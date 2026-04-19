@@ -12,8 +12,27 @@ from unittest.mock import MagicMock
 import pytest
 
 # Make 'app' and 'deerflow' importable from any working directory
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+backend_root = str(Path(__file__).parent.parent)
+scripts_root = str(Path(__file__).resolve().parents[2] / "scripts")
+
+# Insert backend_root first to ensure it's the highest priority
+if backend_root in sys.path:
+    sys.path.remove(backend_root)
+sys.path.insert(0, backend_root)
+
+if scripts_root in sys.path:
+    sys.path.remove(scripts_root)
+sys.path.insert(1, scripts_root)
+
+
+
+def pytest_configure(config):
+    """Pytest configuration hook to ensure sys.path is set correctly."""
+    # Ensure backend root is in sys.path for all tests
+    backend_root = str(Path(__file__).parent.parent)
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+
 
 # Break the circular import chain that exists in production code:
 #   deerflow.subagents.__init__
