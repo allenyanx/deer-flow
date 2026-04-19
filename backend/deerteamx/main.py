@@ -17,6 +17,7 @@ from deerteamx.api.routers import (
     skills_router,
     health_router,
     websocket_router,
+    config_router,
 )
 from deerteamx.config.settings import get_settings
 
@@ -74,6 +75,7 @@ preserving full compatibility with existing DeerFlow agents, tools, and skills.
     app.include_router(templates_router, prefix="/api/v1")
     app.include_router(import_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
+    app.include_router(config_router, prefix="/api/v1")  # Configuration management
     app.include_router(health_router)  # /health (no prefix for load balancer compatibility)
     app.include_router(websocket_router)  # /ws/global
     

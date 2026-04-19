@@ -18,6 +18,8 @@ log/*
 .venv
 venv/
 
+.env.deerteamx
+
 # User config file
 config.yaml
 
