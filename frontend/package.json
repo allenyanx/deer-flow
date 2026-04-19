@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@antv/x6": "^3.1.7",
+    "@antv/x6-react-shape": "^3.0.1",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/lang-javascript": "^6.2.4",
@@ -28,6 +30,7 @@
     "@codemirror/language-data": "^6.5.2",
     "@langchain/core": "^1.1.15",
     "@langchain/langgraph-sdk": "^1.5.3",
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -77,6 +80,7 @@
     "ogl": "^1.0.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hook-form": "^7.72.1",
     "react-resizable-panels": "^4.4.1",
     "rehype-katex": "^7.0.1",
     "rehype-raw": "^7.0.0",
