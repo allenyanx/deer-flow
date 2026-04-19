@@ -17,6 +17,17 @@ dependencies = [
     "langgraph-sdk>=0.1.51",
     "markdown-to-mrkdwn>=0.3.1",
     "wecom-aibot-python-sdk>=0.1.6",
+    "asyncpg>=0.31.0",
+    "sqlalchemy>=2.0.49",
+    "alembic>=1.18.4",
+    "python-jose[cryptography]>=3.5.0",
+    "bcrypt>=5.0.0",
+    "redis>=7.4.0",
+    "filelock>=3.28.0",
+    "pydantic-settings>=2.12.0",
+    "apscheduler>=3.11.2",
+    "pyyaml>=6.0.3",
+    "slowapi>=0.1.9",
 ]
 
 [dependency-groups]
