@@ -14,7 +14,7 @@ from deerteamx.api.schemas.team_schemas import (
 
 router = APIRouter(
     prefix="/auth",
-    tags=["authentication"],
+    tags=["deerteamx-auth"],
     responses={401: {"description": "Unauthorized"}, 403: {"description": "Forbidden"}},
 )
 

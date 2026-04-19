@@ -160,6 +160,34 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
                 "name": "health",
                 "description": "Health check and system status endpoints",
             },
+            {
+                "name": "deerteamx-auth",
+                "description": "DeerTeamX user authentication and authorization",
+            },
+            {
+                "name": "deerteamx-teams",
+                "description": "DeerTeamX team management and configuration",
+            },
+            {
+                "name": "deerteamx-executions",
+                "description": "DeerTeamX execution engine and monitoring",
+            },
+            {
+                "name": "deerteamx-templates",
+                "description": "DeerTeamX reusable team templates",
+            },
+            {
+                "name": "deerteamx-import",
+                "description": "DeerTeamX CrewAI configuration import",
+            },
+            {
+                "name": "deerteamx-skills",
+                "description": "DeerTeamX skill management",
+            },
+            {
+                "name": "deerteamx-health",
+                "description": "DeerTeamX service health check and observability",
+            },
         ],
     )
 
@@ -229,8 +257,8 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
         app.include_router(import_router, prefix="/api/v1")
         app.include_router(deerteamx_skills_router, prefix="/api/v1")
 
-        # Health check and WebSocket endpoints (no prefix for compatibility)
-        app.include_router(deerteamx_health_router)  # /health
+        # Health check and WebSocket endpoints (with dedicated paths)
+        app.include_router(deerteamx_health_router)  # /deerteamx/health
         app.include_router(websocket_router)  # /ws/global
 
         logger.info("✅ DeerTeamX routers registered successfully")

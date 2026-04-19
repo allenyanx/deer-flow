@@ -111,7 +111,14 @@ class Team(Base, TimestampMixin, SoftDeleteMixin):
     
     # Constraints
     __table_args__ = (
-        UniqueConstraint("name", "creator_id", whereclause="deleted_at IS NULL", name="uq_team_name_per_user"),
+        # Partial unique index: enforce unique (name, creator_id) only for non-deleted teams
+        Index(
+            "uq_team_name_per_user",
+            "name",
+            "creator_id",
+            unique=True,
+            postgresql_where="deleted_at IS NULL"
+        ),
         Index("idx_teams_creator_id", "creator_id"),
         Index("idx_teams_status", "status", postgresql_where="deleted_at IS NULL"),
     )

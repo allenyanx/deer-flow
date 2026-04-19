@@ -54,7 +54,14 @@ def upgrade() -> None:
         sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['creator_id'], ['users.user_id'], ),
         sa.PrimaryKeyConstraint('team_id'),
-        sa.UniqueConstraint('name', 'creator_id', name='uq_team_name_per_user', postgresql_where=sa.text('deleted_at IS NULL')),
+    )
+    # Partial unique index: enforce unique (name, creator_id) only for non-deleted teams
+    op.create_index(
+        'uq_team_name_per_user',
+        'teams',
+        ['name', 'creator_id'],
+        unique=True,
+        postgresql_where=sa.text('deleted_at IS NULL')
     )
     op.create_index('idx_teams_creator_id', 'teams', ['creator_id'], unique=False)
     op.create_index('idx_teams_status', 'teams', ['status'], unique=False, postgresql_where=sa.text('deleted_at IS NULL'))
@@ -148,6 +155,7 @@ def downgrade() -> None:
     op.drop_index('idx_executions_team_id', table_name='executions')
     op.drop_table('executions')
     
+    op.drop_index('uq_team_name_per_user', table_name='teams')  # Partial unique index
     op.drop_index('idx_teams_status', table_name='teams')
     op.drop_index('idx_teams_creator_id', table_name='teams')
     op.drop_table('teams')

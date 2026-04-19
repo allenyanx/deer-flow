@@ -194,7 +194,7 @@ def main():
         print("\n🎉 All checks passed! DeerTeamX is ready to use.")
         print("\nNext steps:")
         print("  1. Install dependencies: uv sync")
-        print("  2. Run migrations: alembic upgrade head")
+        print("  2. Run migrations: uv run alembic upgrade head")
         print("  3. Start server: uvicorn app.gateway.app:app --reload")
         print("  4. Visit docs: http://localhost:8001/deerteamx/docs")
         return 0

@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends
 from typing import Any, Dict
 
 router = APIRouter(
-    tags=["infrastructure"],
+    prefix="/deerteamx",
+    tags=["deerteamx-health"],
     responses={503: {"description": "Service Unavailable"}},
 )
 
@@ -33,4 +34,15 @@ async def health_check() -> Dict[str, Any]:
     # 3. Check DeerFlow Gateway: GET {gateway_url}/health
     # 4. Check Qdrant: GET {qdrant_url}/healthz
     # 5. Aggregate results and return status
-    pass
+    
+    # Temporary implementation - returns basic health status
+    return {
+        "status": "healthy",
+        "service": "deerteamx",
+        "version": "1.0.0",
+        "checks": {
+            "database": "pending",  # TODO: Implement actual check
+            "redis": "pending",
+            "deerflow_gateway": "pending",
+        }
+    }
