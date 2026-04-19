@@ -205,6 +205,39 @@ This gateway provides custom endpoints for models, MCP configuration, skills, an
     # Stateless Runs API (stream/wait without a pre-existing thread)
     app.include_router(runs.router)
 
+    # ========================================================================
+    # [DeerTeamX] Multi-Agent Team Orchestration Platform Routers
+    # Mounted at /api/v1 prefix for versioned API access
+    # ========================================================================
+    try:
+        from deerteamx.api.routers import (
+            auth_router,
+            teams_router,
+            executions_router,
+            templates_router,
+            import_router,
+            skills_router as deerteamx_skills_router,
+            health_router as deerteamx_health_router,
+            websocket_router,
+        )
+
+        # Register DeerTeamX business routes with /api/v1 prefix
+        app.include_router(auth_router, prefix="/api/v1")
+        app.include_router(teams_router, prefix="/api/v1")
+        app.include_router(executions_router, prefix="/api/v1")
+        app.include_router(templates_router, prefix="/api/v1")
+        app.include_router(import_router, prefix="/api/v1")
+        app.include_router(deerteamx_skills_router, prefix="/api/v1")
+
+        # Health check and WebSocket endpoints (no prefix for compatibility)
+        app.include_router(deerteamx_health_router)  # /health
+        app.include_router(websocket_router)  # /ws/global
+
+        logger.info("✅ DeerTeamX routers registered successfully")
+    except ImportError as e:
+        logger.warning(f"⚠️  DeerTeamX module not available: {e}")
+        logger.info("💡 To enable DeerTeamX, ensure the deerteamx package is installed")
+
     @app.get("/health", tags=["health"])
     async def health_check() -> dict:
         """Health check endpoint.
