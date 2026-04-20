@@ -135,18 +135,42 @@ def require_owner(resource_model, resource_id_param: str = "team_id"):
     Returns:
         Dependency function that verifies creator_id == current_user.id
     """
+    from fastapi import Path
+    
     async def check(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
-        # resource_id would be extracted from path parameters
+        resource_id: str = Path(..., alias=resource_id_param),
     ):
-        # TODO: Implement ownership verification
-        # 1. Query resource from database by ID
-        # 2. Check if resource exists (404 if not)
-        # 3. Special handling for system templates (creator_id NULL = readable by all)
-        # 4. Verify creator_id == user.id
-        # 5. Return resource if authorized
-        pass
+        # Query resource from database by ID
+        result = await db.execute(
+            select(resource_model).where(
+                getattr(resource_model, resource_model.__table__.primary_key.columns.keys()[0].name) == resource_id
+            )
+        )
+        resource = result.scalar_one_or_none()
+        
+        # Check if resource exists (404 if not)
+        if not resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="RESOURCE_NOT_FOUND",
+            )
+        
+        # Special handling for system templates (creator_id NULL or scope='system')
+        if hasattr(resource, 'scope') and getattr(resource, 'scope', None) == 'system':
+            return resource
+        
+        # Verify creator_id == user.id
+        if hasattr(resource, 'creator_id'):
+            if resource.creator_id != user.user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="NOT_RESOURCE_OWNER",
+                )
+        
+        return resource
+    
     return Depends(check)
 
 
