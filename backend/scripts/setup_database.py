@@ -64,9 +64,22 @@ def run_command(cmd: list[str], description: str, dry_run: bool = False) -> bool
 def check_postgres_connection() -> bool:
     """Check if PostgreSQL is accessible."""
     print("\n🔍 Checking PostgreSQL connection...")
+    
+    from deerteamx.config.settings import get_settings
+    from urllib.parse import urlparse
+    settings = get_settings()
+    parsed = urlparse(settings.DATABASE_URL)
+    
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
+    db_user = parsed.username or "deerteamx_user"
+    
+    print(f"   📍 Target: {host}:{port} (user: {db_user})")
+    
+    # Try connecting via psql using the configured DATABASE_URL
     try:
         result = subprocess.run(
-            ["sudo", "-u", "postgres", "psql", "-c", "SELECT 1;"],
+            ["psql", settings.DATABASE_URL, "-c", "SELECT 1;"],
             capture_output=True,
             text=True,
             timeout=5
@@ -75,7 +88,12 @@ def check_postgres_connection() -> bool:
             print("   ✅ PostgreSQL is accessible")
             return True
         else:
-            print(f"   ❌ PostgreSQL connection failed: {result.stderr}")
+            print(f"   ❌ PostgreSQL connection failed")
+            print(f"      Error: {result.stderr.strip()[:200]}")
+            print(f"\n   💡 Troubleshooting:")
+            print(f"      1. Check if PostgreSQL container is running: docker ps | grep postgres")
+            print(f"      2. Verify port mapping: docker port <container_name>")
+            print(f"      3. Test connection: psql '{settings.DATABASE_URL}'")
             return False
     except FileNotFoundError:
         print("   ❌ PostgreSQL client (psql) not found")
@@ -88,11 +106,37 @@ def check_postgres_connection() -> bool:
 
 def create_user(dry_run: bool = False) -> bool:
     """Create PostgreSQL user if not exists."""
-    sql = """
+    # Use environment variables for credentials
+    from deerteamx.config.settings import get_settings
+    from urllib.parse import urlparse
+    settings = get_settings()
+    
+    # Extract username and password from DATABASE_URL
+    # Format: postgresql://user:pass@host:port/db
+    try:
+        parsed = urlparse(settings.DATABASE_URL)
+        db_user = parsed.username
+        db_pass = parsed.password
+        db_host = parsed.hostname or "localhost"
+        db_port = parsed.port or 5432
+        
+        if not db_user or not db_pass:
+            print(f"   ⚠️  Could not extract credentials from DATABASE_URL, using defaults")
+            db_user = "deerteamx_user"
+            db_pass = "deerteamx_password"
+    except Exception:
+        db_user = "deerteamx_user"
+        db_pass = "deerteamx_password"
+        db_host = "localhost"
+        db_port = 5432
+
+    # For Docker-based PostgreSQL, we need to connect via TCP
+    # We'll use a SQL script that can be executed via psql
+    sql = f"""
     DO $$
     BEGIN
-        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'deerteamx_user') THEN
-            CREATE ROLE deerteamx_user WITH LOGIN PASSWORD 'deerteamx_password';
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{db_user}') THEN
+            CREATE ROLE {db_user} WITH LOGIN PASSWORD '{db_pass}';
             RAISE NOTICE 'User created';
         ELSE
             RAISE NOTICE 'User already exists';
@@ -101,42 +145,86 @@ def create_user(dry_run: bool = False) -> bool:
     $$;
     """
     
-    cmd = ["sudo", "-u", "postgres", "psql", "-c", sql]
-    return run_command(cmd, "Creating PostgreSQL user 'deerteamx_user'", dry_run)
+    # Write SQL to temp file to avoid shell escaping issues
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+        f.write(sql)
+        sql_file = f.name
+    
+    try:
+        cmd = ["psql", settings.DATABASE_URL, "-f", sql_file]
+        success = run_command(cmd, f"Creating PostgreSQL user '{db_user}'", dry_run)
+        return success
+    finally:
+        import os
+        os.unlink(sql_file)
 
 
 def create_database(dry_run: bool = False) -> bool:
     """Create database if not exists."""
-    sql = """
-    SELECT 'CREATE DATABASE deerteamx_db'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'deerteamx_db')\gexec
+    from deerteamx.config.settings import get_settings
+    from urllib.parse import urlparse
+    settings = get_settings()
+    
+    try:
+        parsed = urlparse(settings.DATABASE_URL)
+        db_name = parsed.path.lstrip('/')
+        if not db_name:
+            db_name = "deerteamx_db"
+    except Exception:
+        db_name = "deerteamx_db"
+
+    sql = f"""
+    SELECT 'CREATE DATABASE {db_name}'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{db_name}')\gexec
     """
     
-    cmd = ["sudo", "-u", "postgres", "psql", "-c", sql]
-    return run_command(cmd, "Creating database 'deerteamx_db'", dry_run)
+    # Note: This needs superuser privileges. For Docker PostgreSQL,
+    # the default user usually has these privileges.
+    # We'll execute this on the 'postgres' database first
+    try:
+        parsed = urlparse(settings.DATABASE_URL)
+        base_url = f"postgresql://{parsed.username}:{parsed.password}@{parsed.hostname}:{parsed.port}/postgres"
+    except Exception:
+        base_url = "postgresql://postgres:postgres@localhost:5433/postgres"
+    
+    cmd = ["psql", base_url, "-c", sql]
+    return run_command(cmd, f"Creating database '{db_name}'", dry_run)
 
 
 def grant_privileges(dry_run: bool = False) -> bool:
     """Grant privileges to user."""
+    from deerteamx.config.settings import get_settings
+    from urllib.parse import urlparse
+    settings = get_settings()
+    
+    try:
+        parsed = urlparse(settings.DATABASE_URL)
+        db_user = parsed.username or "deerteamx_user"
+        db_name = parsed.path.lstrip('/') or "deerteamx_db"
+    except Exception:
+        db_user = "deerteamx_user"
+        db_name = "deerteamx_db"
+
     commands = [
         (
-            ["sudo", "-u", "postgres", "psql", "-c", 
-             "GRANT ALL PRIVILEGES ON DATABASE deerteamx_db TO deerteamx_user;"],
+            ["psql", settings.DATABASE_URL, "-c", 
+             f"GRANT ALL PRIVILEGES ON DATABASE {db_name} TO {db_user};"],
             "Granting database privileges"
         ),
         (
-            ["sudo", "-u", "postgres", "psql", "-d", "deerteamx_db", "-c",
-             "GRANT ALL ON SCHEMA public TO deerteamx_user;"],
+            ["psql", settings.DATABASE_URL, "-c",
+             f"GRANT ALL ON SCHEMA public TO {db_user};"],
             "Granting schema privileges"
         ),
         (
-            ["sudo", "-u", "postgres", "psql", "-d", "deerteamx_db", "-c",
-             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO deerteamx_user;"],
+            ["psql", settings.DATABASE_URL, "-c",
+             f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {db_user};"],
             "Setting default table privileges"
         ),
         (
-            ["sudo", "-u", "postgres", "psql", "-d", "deerteamx_db", "-c",
-             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO deerteamx_user;"],
+            ["psql", settings.DATABASE_URL, "-c",
+             f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {db_user};"],
             "Setting default sequence privileges"
         ),
     ]
