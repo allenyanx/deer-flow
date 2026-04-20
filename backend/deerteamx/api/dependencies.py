@@ -5,14 +5,16 @@ and distributed locks.
 """
 
 from typing import Optional
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from jose import JWTError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deerteamx.database.session import get_db
-from deerteamx.config.settings import get_settings
+from deerteamx.api.middleware.auth import decode_token
 from deerteamx.models.base import User
 
 # Security scheme for JWT Bearer tokens
@@ -42,11 +44,13 @@ PERMISSION_MATRIX = {
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """Parse JWT token and return current user object.
     
     Args:
         credentials: HTTP Bearer token credentials
+        db: Database session
         
     Returns:
         User object from database
@@ -54,13 +58,42 @@ async def get_current_user(
     Raises:
         HTTPException: 401 if token is invalid or expired
     """
-    # TODO: Implement JWT parsing and user lookup
-    # 1. Extract token from credentials
-    # 2. Decode JWT with SECRET_KEY
-    # 3. Extract user_id from payload
-    # 4. Query user from database (with caching)
-    # 5. Return user object
-    pass
+    try:
+        # Extract and decode token
+        token = credentials.credentials
+        payload = decode_token(token)
+        
+        # Extract user_id from payload
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="UNAUTHORIZED",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Convert to UUID
+        user_id = UUID(user_id_str)
+        
+        # Query user from database
+        result = await db.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="UNAUTHORIZED",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        return user
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="UNAUTHORIZED",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def require_permission(permission: str):
