@@ -29,6 +29,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "slowapi>=0.1.9",
     "psycopg2-binary>=2.9.11",
+    "prometheus-client>=0.21.0",
 ]
 
 [dependency-groups]

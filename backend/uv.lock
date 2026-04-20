@@ -813,6 +813,7 @@ dependencies = [
     { name = "langgraph-sdk" },
     { name = "lark-oapi" },
     { name = "markdown-to-mrkdwn" },
+    { name = "prometheus-client" },
     { name = "psycopg2-binary" },
     { name = "pydantic-settings" },
     { name = "python-jose", extra = ["cryptography"] },
@@ -847,6 +848,7 @@ requires-dist = [
     { name = "langgraph-sdk", specifier = ">=0.1.51" },
     { name = "lark-oapi", specifier = ">=1.4.0" },
     { name = "markdown-to-mrkdwn", specifier = ">=0.3.1" },
+    { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.11" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.5.0" },
@@ -3022,6 +3024,15 @@ wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ac/96/84078e09f16a1dad208f2fe0f8a81be2cf36e024675b0f9eec0c2f6e2182/primp-0.15.0-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:592f6079646bdf5abbbfc3b0a28dac8de943f8907a250ce09398cda5eaebd260", size = 3418567, upload-time = "2025-04-17T11:41:01.595Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6c/80/8a7a9587d3eb85be3d0b64319f2f690c90eb7953e3f73a9ddd9e46c8dc42/primp-0.15.0-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:5a728e5a05f37db6189eb413d22c78bd143fa59dd6a8a26dacd43332b3971fe8", size = 3606279, upload-time = "2025-04-17T11:41:03.61Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/0c/dd/f0183ed0145e58cf9d286c1b2c14f63ccee987a4ff79ac85acc31b5d86bd/primp-0.15.0-cp38-abi3-win_amd64.whl", hash = "sha256:aeb6bd20b06dfc92cfe4436939c18de88a58c640752cf7f30d9e4ae893cdec32", size = 3149967, upload-time = "2025-04-17T11:41:07.067Z" },
+]
+
+[[package]]
+name = "prometheus-client"
+version = "0.25.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1b/fb/d9aa83ffe43ce1f19e557c0971d04b90561b0cfd50762aafb01968285553/prometheus_client-0.25.0.tar.gz", hash = "sha256:5e373b75c31afb3c86f1a52fa1ad470c9aace18082d39ec0d2f918d11cc9ba28", size = 86035, upload-time = "2026-04-09T19:53:42.359Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/8d/9b/d4b1e644385499c8346fa9b622a3f030dce14cd6ef8a1871c221a17a67e7/prometheus_client-0.25.0-py3-none-any.whl", hash = "sha256:d5aec89e349a6ec230805d0df882f3807f74fd6c1a2fa86864e3c2279059fed1", size = 64154, upload-time = "2026-04-09T19:53:41.324Z" },
 ]
 
 [[package]]
