@@ -14,6 +14,7 @@ from deerteamx.api.routers import (
     teams_router,
     executions_router,
     templates_router,
+    versions_router,
     import_router,
     skills_router,
     health_router,
@@ -152,6 +153,7 @@ preserving full compatibility with existing DeerFlow agents, tools, and skills.
     app.include_router(teams_router, prefix="/api/v1")
     app.include_router(executions_router, prefix="/api/v1")
     app.include_router(templates_router, prefix="/api/v1")
+    app.include_router(versions_router, prefix="/api/v1")  # Version management
     app.include_router(import_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
     app.include_router(config_router, prefix="/api/v1")  # Configuration management

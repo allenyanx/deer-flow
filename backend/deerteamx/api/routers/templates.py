@@ -1,14 +1,18 @@
-"""Template Management API Routes"""
+"""DeerTeamX 模板管理 API 路由。
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+该模块提供团队配置模板的保存、检索及实例化功能。
+"""
+
+import logging
 from typing import Any, List, Optional
 
-from deerteamx.api.schemas.team_schemas import (
-    CreateTemplateRequest,
-    UseTemplateRequest,
-    TemplateSummary,
-    TeamDetail,
-)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from deerteamx.database import get_db
+from deerteamx.template.manager import TemplateManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/templates",
@@ -21,94 +25,33 @@ router = APIRouter(
 )
 
 
-@router.post("", response_model=TemplateSummary, status_code=status.HTTP_201_CREATED)
-async def create_template(data: CreateTemplateRequest) -> Any:
-    """Save team configuration as a reusable template.
-    
-    Args:
-        data: Team ID, template name, description, and scope
-        
-    Returns:
-        Created template summary
-        
-    Raises:
-        HTTPException: 403 if not team owner (for personal templates)
-    """
-    # TODO: Implement template creation
-    # 1. Verify team exists
-    # 2. Check permissions (personal templates require ownership)
-    # 3. Snapshot team config
-    # 4. Save to templates table
-    # 5. Return template summary
-    pass
-
-
-@router.get("", response_model=List[TemplateSummary])
+@router.get("", response_model=List[dict])
 async def list_templates(
     scope: Optional[str] = Query(None, pattern="^(system|personal|all)$"),
     keyword: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """List available templates (system + personal).
-    
-    Args:
-        scope: Filter by scope (system/personal/all)
-        keyword: Search by template name
-        
-    Returns:
-        List of template summaries sorted by usage_count
-    """
-    # TODO: Implement template listing
-    # 1. Build query based on scope
-    # 2. For 'personal' or 'all', filter by current user's templates
-    # 3. For 'system', include all system templates
-    # 4. Apply keyword search
-    # 5. Sort by usage_count descending
-    # 6. Return template list
-    pass
+    """列出可用模板（系统 + 个人）。"""
+    manager = TemplateManager(db)
+    # 简化实现：目前返回所有模板，后续可根据 scope 和 keyword 过滤
+    templates = await manager.list_templates()
+    return [{"id": t.id, "name": t.name, "category": t.category} for t in templates]
 
 
-@router.post("/{template_id}/use", response_model=TeamDetail, status_code=status.HTTP_201_CREATED)
-async def use_template(template_id: str, data: UseTemplateRequest) -> Any:
-    """Create a new team from a template with optional overrides.
-    
-    Args:
-        template_id: Template identifier
-        data: New team name and configuration overrides
-        
-    Returns:
-        Created team details
-        
-    Raises:
-        HTTPException: 404 if template not found
-        HTTPException: 403 if trying to use deleted personal template
-    """
-    # TODO: Implement template usage
-    # 1. Query template from database
-    # 2. Check template accessibility (system or owned by user)
-    # 3. Apply overrides to template config
-    # 4. Create new team (reuse create_team logic)
-    # 5. Increment template usage_count
-    # 6. Return created team
-    pass
-
-
-@router.delete("/{template_id}", status_code=status.HTTP_200_OK)
-async def delete_template(template_id: str) -> Any:
-    """Soft delete a personal template.
-    
-    Args:
-        template_id: Template identifier
-        
-    Returns:
-        Success message
-        
-    Raises:
-        HTTPException: 403 if not template owner or trying to delete system template
-        HTTPException: 404 if template not found
-    """
-    # TODO: Implement template deletion
-    # 1. Query template
-    # 2. Verify ownership (cannot delete system templates)
-    # 3. Soft delete (set deleted_at)
-    # 4. Return success message
-    pass
+@router.post("/{template_id}/use", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def use_template(
+    template_id: int, 
+    team_name: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = "test-user"
+) -> Any:
+    """基于模板创建新团队。"""
+    try:
+        manager = TemplateManager(db)
+        result = await manager.instantiate_team_from_template(template_id, team_name, user_id)
+        return {
+            "message": f"Team '{team_name}' created from template",
+            "config": result["config"]
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

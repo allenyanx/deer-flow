@@ -8,6 +8,7 @@ from deerteamx.api.routers.import_export import router as import_router
 from deerteamx.api.routers.skills import router as skills_router
 from deerteamx.api.routers.health import router as health_router
 from deerteamx.api.routers.websocket import router as websocket_router
+from deerteamx.api.routers.versions import router as versions_router
 from deerteamx.api.routers.config import router as config_router
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "health_router",
     "websocket_router",
     "config_router",
+    "versions_router",
 ]
