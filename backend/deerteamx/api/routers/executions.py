@@ -1,109 +1,103 @@
-"""Execution Engine API Routes"""
+"""DeerTeamX 执行管理 API 路由。
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, status
-from typing import Any, Optional
+该模块提供触发执行、查询状态以及 WebSocket 实时推送的 RESTful 接口。
+"""
 
-from deerteamx.api.schemas.team_schemas import (
-    TriggerExecutionRequest,
-    ExecutionDetail,
-    ExecutionListResponse,
-)
+import logging
+from typing import Optional
 
-router = APIRouter(
-    prefix="/executions",
-    tags=["execution-engine"],
-    responses={
-        401: {"description": "Unauthorized"},
-        403: {"description": "Forbidden"},
-        404: {"description": "Not Found"},
-    },
-)
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from deerteamx.database import get_db
+from deerteamx.runtime.executor import TeamExecutor
+from deerteamx.runtime.ws_bridge import SSEToWebSocketBridge
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1/executions", tags=["executions"])
 
 
-@router.post("", response_model=ExecutionDetail, status_code=status.HTTP_202_ACCEPTED)
-async def trigger_execution(data: TriggerExecutionRequest) -> Any:
-    """Trigger team execution asynchronously.
+class TriggerExecutionRequest:
+    """触发执行的请求体模型（简化版，实际可用 Pydantic）。"""
+    def __init__(self, team_id: str, input_data: dict):
+        self.team_id = team_id
+        self.input_data = input_data
+
+
+@router.post("")
+async def trigger_execution(
+    request: dict, 
+    db: AsyncSession = Depends(get_db),
+    user_id: str = "test-user" # 实际应从 JWT Token 中提取
+):
+    """触发团队执行。
     
-    Args:
-        data: Team ID and input parameters
-        
-    Returns:
-        Execution ID and initial status (pending)
-        
-    Process:
-        1. Generate execution_id and thread_id
-        2. Write to executions table
-        3. Build StaticTeamGraph in background
-        4. Push progress via WebSocket
+    Request Body:
+    {
+        "team_id": "team-analytics-dashboard",
+        "input_data": {"query": "分析Q1销售数据"}
+    }
     """
-    # TODO: Implement execution triggering
-    # 1. Validate team exists and is not locked
-    # 2. Generate unique execution_id and thread_id
-    # 3. Create execution record in database
-    # 4. Acquire distributed lock on team
-    # 5. Start background task to run execution
-    # 6. Return execution details
-    pass
+    try:
+        # 1. 获取团队配置 (此处简化，实际应从 DB 或配置中心加载)
+        # team_config = await get_team_config(request["team_id"])
+        # 为测试目的使用 Mock 配置
+        team_config = {
+            "roles": [{"role_id": "r1", "agent_name": "test-agent"}],
+            "tasks": [{"task_id": "t1", "dependencies": []}]
+        }
+        
+        executor = TeamExecutor(db)
+        execution_id = await executor.execute_team(
+            team_id=request["team_id"],
+            team_config=team_config,
+            input_data=request.get("input_data", {}),
+            user_id=user_id
+        )
+        
+        return {
+            "execution_id": execution_id,
+            "status": "pending",
+            "message": "Execution triggered successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to trigger execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{execution_id}", response_model=ExecutionDetail)
-async def get_execution(execution_id: str) -> Any:
-    """Query execution status and results.
+@router.get("/{execution_id}")
+async def get_execution_status(execution_id: str, db: AsyncSession = Depends(get_db)):
+    """查询执行状态及结果。"""
+    executor = TeamExecutor(db)
+    execution = await executor.get_execution(execution_id)
     
-    Args:
-        execution_id: Execution identifier
-        
-    Returns:
-        Full execution details with progress and token stats
-    """
-    # TODO: Implement execution status query
-    # 1. Query execution from database
-    # 2. Calculate progress (completed_nodes / total_nodes)
-    # 3. Return execution details
-    pass
-
-
-@router.get("", response_model=ExecutionListResponse)
-async def list_executions(
-    team_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-) -> Any:
-    """List execution history with pagination.
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
     
-    Args:
-        team_id: Filter by team ID
-        status: Filter by execution status
-        limit: Items per page (default: 50)
-        offset: Pagination offset (default: 0)
-        
-    Returns:
-        Paginated execution list
-    """
-    # TODO: Implement execution listing
-    # 1. Build query with filters
-    # 2. Apply pagination
-    # 3. Return execution list
-    pass
+    return execution.to_dict()
 
 
 @router.websocket("/ws/{execution_id}")
-async def websocket_execution_updates(websocket: WebSocket, execution_id: str):
-    """WebSocket endpoint for real-time execution updates.
+async def websocket_execution_endpoint(
+    websocket: WebSocket, 
+    execution_id: str, 
+    db: AsyncSession = Depends(get_db)
+):
+    """WebSocket 实时推送执行状态。
     
-    Args:
-        websocket: Client WebSocket connection
-        execution_id: Execution identifier to subscribe to
-        
-    Protocol:
-        - Server pushes execution_update events
-        - Events include node transitions, token usage, errors
+    前端连接示例: ws://localhost:8000/api/v1/executions/ws/{execution_id}
     """
-    # TODO: Implement WebSocket bridge
-    # 1. Accept WebSocket connection
-    # 2. Authenticate user (verify ownership of execution)
-    # 3. Subscribe to DeerFlow SSE stream for thread_id
-    # 4. Bridge SSE events to WebSocket messages
-    # 5. Handle disconnection gracefully
-    pass
+    # 1. 查询对应的 thread_id
+    executor = TeamExecutor(db)
+    execution = await executor.get_execution(execution_id)
+    
+    if not execution:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Execution not found"})
+        await websocket.close()
+        return
+
+    # 2. 启动桥接器
+    bridge = SSEToWebSocketBridge()
+    await bridge.bridge(websocket, execution.thread_id, execution_id)

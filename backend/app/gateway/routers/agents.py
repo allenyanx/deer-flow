@@ -53,6 +53,12 @@ class AgentUpdateRequest(BaseModel):
     soul: str | None = Field(default=None, description="Updated SOUL.md content")
 
 
+class AgentSkillsUpdateRequest(BaseModel):
+    """Request body for updating an agent's skills binding."""
+
+    skills: list[str] = Field(default=[], description="List of skill names to bind to this agent. Empty list disables all skills.")
+
+
 def _validate_agent_name(name: str) -> None:
     """Validate agent name against allowed pattern.
 
@@ -402,3 +408,61 @@ async def delete_agent(name: str) -> None:
     except Exception as e:
         logger.error(f"Failed to delete agent '{name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete agent: {str(e)}")
+
+
+@router.put(
+    "/agents/{name}/skills",
+    response_model=AgentResponse,
+    summary="Update Agent Skills Binding",
+    description="Atomically update the skills bound to a specific custom agent.",
+)
+async def update_agent_skills(name: str, request: AgentSkillsUpdateRequest) -> AgentResponse:
+    """Update the skills bound to a custom agent.
+
+    This endpoint ensures atomic updates to the skills field in config.yaml,
+    preventing concurrency conflicts that might occur with direct file manipulation.
+
+    Args:
+        name: The agent name.
+        request: The skills update request containing the list of skill names.
+
+    Returns:
+        The updated agent details.
+
+    Raises:
+        HTTPException: 404 if agent not found.
+    """
+    _require_agents_api_enabled()
+    _validate_agent_name(name)
+    name = _normalize_agent_name(name)
+
+    try:
+        agent_cfg = load_agent_config(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
+
+    agent_dir = get_paths().agent_dir(name)
+    config_file = agent_dir / "config.yaml"
+
+    try:
+        # Read existing config to preserve other fields
+        with open(config_file, "r", encoding="utf-8") as f:
+            config_data = yaml.safe_load(f) or {}
+
+        # Update skills field atomically
+        config_data["skills"] = request.skills
+
+        # Write back to file
+        with open(config_file, "w", encoding="utf-8") as f:
+            yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
+
+        logger.info(f"Updated skills for agent '{name}': {request.skills}")
+
+        refreshed_cfg = load_agent_config(name)
+        return _agent_config_to_response(refreshed_cfg, include_soul=True)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update skills for agent '{name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update agent skills: {str(e)}")
