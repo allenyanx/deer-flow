@@ -13,6 +13,7 @@
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -45,7 +46,7 @@ def test_settings():
     return settings
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture
 async def test_engine(test_settings):
     """创建测试数据库引擎
     
@@ -72,7 +73,7 @@ async def test_engine(test_settings):
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """为每个测试创建独立的数据库会话
     
@@ -94,7 +95,7 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_user(db_session: AsyncSession) -> User:
     """创建测试用户"""
     user = User(
