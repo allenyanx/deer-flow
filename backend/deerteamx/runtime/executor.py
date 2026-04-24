@@ -37,7 +37,20 @@ class TeamExecutor:
             
         Returns:
             execution_id: 业务层执行标识。
+            
+        Raises:
+            ValueError: 如果配置不完整(缺少roles或tasks)
         """
+        # 0. 配置完整性校验
+        roles = team_config.get("roles", [])
+        tasks = team_config.get("tasks", [])
+        
+        if not roles:
+            raise ValueError("INCOMPLETE_CONFIG: 团队配置缺少角色定义(roles)")
+        
+        if not tasks:
+            raise ValueError("INCOMPLETE_CONFIG: 团队配置缺少任务定义(tasks)")
+        
         # 1. 生成唯一标识
         execution_id = f"exec-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8]}"
         thread_id = f"thread-{uuid.uuid4().hex}"

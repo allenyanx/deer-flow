@@ -73,51 +73,16 @@ async def test_engine(test_settings):
     await engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """为每个测试创建独立的数据库会话
-    
-    每个测试执行后自动回滚，确保测试隔离性。
-    """
-    async_session_maker = async_sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
-    
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.rollback()  # 测试结束后回滚
-        finally:
-            await session.close()
-
-
-@pytest_asyncio.fixture
-async def test_user(db_session: AsyncSession) -> User:
-    """创建测试用户"""
-    user = User(
-        user_id=uuid4(),
-        username=f"test_user_{uuid4().hex[:8]}",
-        password_hash="$2b$12$LJ3m4ys3Lk5zF6qH8pN9eOxYzK1wQ2rT3uV4xW5yZ6aB7cD8eF9gH",
-        email=f"test_{uuid4().hex[:8]}@example.com",
-        role_type="developer"
-    )
-    
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    
-    return user
+# Fixture 已移至 conftest.py，此处不再重复定义
+# - db_session: 使用共享的数据库会话 fixture (不回滚)
+# - test_user: 使用共享的测试用户 fixture
 
 
 @pytest.fixture
 def sample_team_data():
-    """示例团队配置数据"""
+    """示例团队配置数据（每次生成唯一名称，避免重复）"""
     return {
-        "name": "代码审查团队",
+        "name": f"代码审查团队_{uuid4().hex[:8]}",  # ← 添加唯一后缀
         "description": "自动化代码审查工作流",
         "execution_mode": "static",
         "roles": [
