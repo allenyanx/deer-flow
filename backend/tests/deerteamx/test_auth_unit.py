@@ -630,24 +630,24 @@ class TestAuthEndpoints:
         - 用户 role_type 默认为 'developer'
         - 用户名唯一(存储在数据库中)
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        response = client.post("/api/v1/auth/register", json={
-            "username": f"testuser_{uuid4().hex[:8]}",
-            "password": "SecurePass123!",
-            "email": "test@example.com"
-        })
-        
-        assert response.status_code == status.HTTP_201_CREATED
-        data = response.json()
-        assert "data" in data
-        assert "access_token" in data["data"]
-        assert "refresh_token" in data["data"]
-        assert "user" in data["data"]
-        assert data["data"]["user"]["role_type"] == "developer"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/api/v1/auth/register", json={
+                "username": f"testuser_{uuid4().hex[:8]}",
+                "password": "SecurePass123!",
+                "email": "test@example.com"
+            })
+            
+            assert response.status_code == status.HTTP_201_CREATED
+            data = response.json()
+            assert "data" in data
+            assert "access_token" in data["data"]
+            assert "refresh_token" in data["data"]
+            assert "user" in data["data"]
+            assert data["data"]["user"]["role_type"] == "developer"
 
     @pytest.mark.asyncio
     async def test_register_duplicate_username(self):
@@ -657,27 +657,29 @@ class TestAuthEndpoints:
         - 返回 409 Conflict
         - 错误详情为 'USERNAME_ALREADY_EXISTS'
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        username = f"dup_user_{uuid4().hex[:8]}"
-        
-        # 第一次注册成功
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": "Password123!",
-        })
-        
-        # 第二次使用相同用户名注册失败
-        response = client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": "AnotherPassword456!",
-        })
-        
-        assert response.status_code == status.HTTP_409_CONFLICT
-        assert response.json()["detail"] == "USERNAME_ALREADY_EXISTS"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            username = f"dup_user_{uuid4().hex[:8]}"
+            
+            # 第一次注册成功
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": "Password123!",
+            })
+            
+            # 第二次使用相同用户名注册失败
+            response = await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": "AnotherPassword456!",
+            })
+            
+            assert response.status_code == status.HTTP_409_CONFLICT
+            error_data = response.json()
+            assert "error" in error_data
+            assert error_data["error"]["code"] == "USERNAME_ALREADY_EXISTS"
 
     @pytest.mark.asyncio
     async def test_login_success(self):
@@ -688,31 +690,31 @@ class TestAuthEndpoints:
         - 响应包含有效的 JWT tokens
         - 用户信息与注册用户匹配
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        username = f"login_user_{uuid4().hex[:8]}"
-        password = "LoginPass123!"
-        
-        # 先注册用户
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": password,
-        })
-        
-        # 使用正确凭据登录
-        response = client.post("/api/v1/auth/login", json={
-            "username": username,
-            "password": password,
-        })
-        
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert "access_token" in data["data"]
-        assert "refresh_token" in data["data"]
-        assert data["data"]["user"]["username"] == username
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            username = f"login_user_{uuid4().hex[:8]}"
+            password = "LoginPass123!"
+            
+            # 先注册用户
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": password,
+            })
+            
+            # 使用正确凭据登录
+            response = await client.post("/api/v1/auth/login", json={
+                "username": username,
+                "password": password,
+            })
+            
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert "access_token" in data["data"]
+            assert "refresh_token" in data["data"]
+            assert data["data"]["user"]["username"] == username
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self):
@@ -722,28 +724,30 @@ class TestAuthEndpoints:
         - 返回 401 Unauthorized
         - 错误详情为 'INVALID_CREDENTIALS'
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        username = f"wrong_pass_user_{uuid4().hex[:8]}"
-        password = "CorrectPass123!"
-        
-        # 注册用户
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": password,
-        })
-        
-        # 使用错误密码登录
-        response = client.post("/api/v1/auth/login", json={
-            "username": username,
-            "password": "WrongPassword456!",
-        })
-        
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert response.json()["detail"] == "INVALID_CREDENTIALS"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            username = f"wrong_pass_user_{uuid4().hex[:8]}"
+            password = "CorrectPass123!"
+            
+            # 注册用户
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": password,
+            })
+            
+            # 使用错误密码登录
+            response = await client.post("/api/v1/auth/login", json={
+                "username": username,
+                "password": "WrongPassword456!",
+            })
+            
+            assert response.status_code == status.HTTP_401_UNAUTHORIZED
+            error_data = response.json()
+            assert "error" in error_data
+            assert error_data["error"]["code"] == "INVALID_CREDENTIALS"
 
     @pytest.mark.asyncio
     async def test_role_update_success(self):
@@ -754,42 +758,42 @@ class TestAuthEndpoints:
         - 新 access token 包含更新后的 role_type
         - 数据库反映角色变更
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        # 注册并登录
-        username = f"role_user_{uuid4().hex[:8]}"
-        password = "RolePass123!"
-        
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": password,
-        })
-        
-        login_response = client.post("/api/v1/auth/login", json={
-            "username": username,
-            "password": password,
-        })
-        
-        access_token = login_response.json()["data"]["access_token"]
-        
-        # 更新角色为 researcher
-        response = client.put(
-            "/api/v1/auth/users/me/role",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={"role_type": "researcher"}
-        )
-        
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["data"]["user"]["role_type"] == "researcher"
-        
-        # 解码新 Token 以验证 role_type
-        new_token = data["data"]["access_token"]
-        decoded = decode_token(new_token)
-        assert decoded["role_type"] == "researcher"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 注册并登录
+            username = f"role_user_{uuid4().hex[:8]}"
+            password = "RolePass123!"
+            
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": password,
+            })
+            
+            login_response = await client.post("/api/v1/auth/login", json={
+                "username": username,
+                "password": password,
+            })
+            
+            access_token = login_response.json()["data"]["access_token"]
+            
+            # 更新角色为 researcher
+            response = await client.put(
+                "/api/v1/auth/users/me/role",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={"role_type": "researcher"}
+            )
+            
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data["data"]["user"]["role_type"] == "researcher"
+            
+            # 解码新 Token 以验证 role_type
+            new_token = data["data"]["access_token"]
+            decoded = decode_token(new_token)
+            assert decoded["role_type"] == "researcher"
 
     @pytest.mark.asyncio
     async def test_role_update_invalid_role(self):
@@ -799,35 +803,35 @@ class TestAuthEndpoints:
         - 返回 400 Bad Request
         - 错误消息指示无效的角色类型
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        # 注册并登录
-        username = f"invalid_role_user_{uuid4().hex[:8]}"
-        password = "RolePass123!"
-        
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": password,
-        })
-        
-        login_response = client.post("/api/v1/auth/login", json={
-            "username": username,
-            "password": password,
-        })
-        
-        access_token = login_response.json()["data"]["access_token"]
-        
-        # 尝试更新为无效角色
-        response = client.put(
-            "/api/v1/auth/users/me/role",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={"role_type": "admin"}  # 无效角色
-        )
-        
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 注册并登录
+            username = f"invalid_role_user_{uuid4().hex[:8]}"
+            password = "RolePass123!"
+            
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": password,
+            })
+            
+            login_response = await client.post("/api/v1/auth/login", json={
+                "username": username,
+                "password": password,
+            })
+            
+            access_token = login_response.json()["data"]["access_token"]
+            
+            # 尝试更新为无效角色
+            response = await client.put(
+                "/api/v1/auth/users/me/role",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={"role_type": "admin"}  # 无效角色
+            )
+            
+            assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_get_permissions(self):
@@ -838,40 +842,40 @@ class TestAuthEndpoints:
         - 响应包含 role_type 和 permissions 字典
         - 权限与用户角色的 PERMISSION_MATRIX 匹配
         """
-        from fastapi.testclient import TestClient
+        from httpx import ASGITransport, AsyncClient
         from deerteamx.main import app
         
-        client = TestClient(app)
-        
-        # 以 developer 身份注册并登录
-        username = f"perm_user_{uuid4().hex[:8]}"
-        password = "PermPass123!"
-        
-        client.post("/api/v1/auth/register", json={
-            "username": username,
-            "password": password,
-        })
-        
-        login_response = client.post("/api/v1/auth/login", json={
-            "username": username,
-            "password": password,
-        })
-        
-        access_token = login_response.json()["data"]["access_token"]
-        
-        # 获取权限
-        response = client.get(
-            "/api/v1/auth/permissions",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-        
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert "role_type" in data["data"]
-        assert "permissions" in data["data"]
-        assert data["data"]["role_type"] == "developer"
-        
-        # 验证权限结构
-        permissions = data["data"]["permissions"]
-        assert isinstance(permissions, dict)
-        assert "team" in permissions or any("team" in key for key in permissions.keys())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 以 developer 身份注册并登录
+            username = f"perm_user_{uuid4().hex[:8]}"
+            password = "PermPass123!"
+            
+            await client.post("/api/v1/auth/register", json={
+                "username": username,
+                "password": password,
+            })
+            
+            login_response = await client.post("/api/v1/auth/login", json={
+                "username": username,
+                "password": password,
+            })
+            
+            access_token = login_response.json()["data"]["access_token"]
+            
+            # 获取权限
+            response = await client.get(
+                "/api/v1/auth/permissions",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert "role_type" in data["data"]
+            assert "permissions" in data["data"]
+            assert data["data"]["role_type"] == "developer"
+            
+            # 验证权限结构
+            permissions = data["data"]["permissions"]
+            assert isinstance(permissions, dict)
+            assert "team" in permissions or any("team" in key for key in permissions.keys())
