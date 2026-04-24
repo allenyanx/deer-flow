@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deerteamx.database import get_db
+from deerteamx.database.session import get_db
 from deerteamx.runtime.executor import TeamExecutor
 from deerteamx.runtime.ws_bridge import SSEToWebSocketBridge
 

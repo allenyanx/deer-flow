@@ -24,7 +24,7 @@ from deerteamx.api.schemas.team_schemas import (
 )
 from deerteamx.database.session import get_db
 from deerteamx.services.team_service import TeamService
-from deerteamx.core.auth import get_current_user
+from deerteamx.api.dependencies import get_current_user
 from deerteamx.models.base import User
 
 logger = logging.getLogger(__name__)

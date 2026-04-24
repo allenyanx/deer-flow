@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, ARRAY
 from sqlalchemy.sql import func
 
-from deerteamx.database import Base
+from deerteamx.models.base import Base
 
 
 class Execution(Base):
