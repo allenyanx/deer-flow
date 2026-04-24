@@ -262,36 +262,37 @@ def grant_privileges(dry_run: bool = False) -> bool:
         db_host = "localhost"
         db_port = 5432
 
+    # Use postgres superuser to grant privileges
+    postgres_pass = os.environ.get("POSTGRES_PASSWORD", "postgres")
+    env = os.environ.copy()
+    env["PGPASSWORD"] = postgres_pass
+
     commands = [
         (
             ["psql", "-h", db_host, "-p", str(db_port),
-             "-U", db_user, "-d", db_name, "-c",
+             "-U", "postgres", "-d", db_name, "-c",
              f"GRANT ALL PRIVILEGES ON DATABASE {db_name} TO {db_user};"],
             "Granting database privileges"
         ),
         (
             ["psql", "-h", db_host, "-p", str(db_port),
-             "-U", db_user, "-d", db_name, "-c",
+             "-U", "postgres", "-d", db_name, "-c",
              f"GRANT ALL ON SCHEMA public TO {db_user};"],
             "Granting schema privileges"
         ),
         (
             ["psql", "-h", db_host, "-p", str(db_port),
-             "-U", db_user, "-d", db_name, "-c",
+             "-U", "postgres", "-d", db_name, "-c",
              f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {db_user};"],
             "Setting default table privileges"
         ),
         (
             ["psql", "-h", db_host, "-p", str(db_port),
-             "-U", db_user, "-d", db_name, "-c",
+             "-U", "postgres", "-d", db_name, "-c",
              f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {db_user};"],
             "Setting default sequence privileges"
         ),
     ]
-    
-    # Set password environment variable
-    env = os.environ.copy()
-    env["PGPASSWORD"] = db_pass
     
     all_success = True
     for cmd, description in commands:
@@ -313,9 +314,28 @@ def run_alembic_migration(dry_run: bool = False) -> bool:
         with open(env_file) as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
                     key, value = line.split('=', 1)
-                    env[key.strip()] = value.strip()
+                    key_stripped = key.strip()
+                    value_stripped = value.strip()
+                    
+                    # Remove inline comments (everything after # that's not in quotes)
+                    # Simple approach: split on first # and take the first part
+                    if '#' in value_stripped:
+                        # Check if it's not inside quotes
+                        if not (value_stripped.startswith('"') or value_stripped.startswith("'")):
+                            value_stripped = value_stripped.split('#')[0].strip()
+                    
+                    # Convert async database URL to sync for Alembic
+                    if key_stripped == "DATABASE_URL":
+                        # Replace postgresql+asyncpg:// with postgresql://
+                        value_stripped = value_stripped.replace("postgresql+asyncpg://", "postgresql://")
+                        print(f"   ℹ️  Converting async URL to sync for Alembic")
+                    
+                    env[key_stripped] = value_stripped
     else:
         print("   ⚠️  .env.deerteamx not found, using system environment")
         env = os.environ.copy()
@@ -376,13 +396,16 @@ def verify_setup() -> bool:
         print("   ❌ DATABASE_URL not found in .env.deerteamx")
         return False
     
+    # Convert async URL to sync for asyncpg (asyncpg only accepts postgresql:// or postgres://)
+    db_url_sync = db_url.replace("postgresql+asyncpg://", "postgresql://")
+    
     # Test connection
     try:
         import asyncpg
         import asyncio
         
         async def test_connection():
-            conn = await asyncpg.connect(db_url)
+            conn = await asyncpg.connect(db_url_sync)
             await conn.close()
             return True
         
