@@ -84,7 +84,7 @@ class ConfigValidator:
         
         # Determine overall status
         all_healthy = all(
-            check.get("status") == "ok" 
+            check.get("status") in ["ok", "skipped"] 
             for check in checks.values()
         )
         any_critical_error = any(
@@ -133,6 +133,15 @@ class ConfigValidator:
     async def _check_redis(self) -> Dict[str, Any]:
         """Check Redis connectivity."""
         start = time.time()
+        
+        # Skip check if Redis is not configured
+        if self.redis_client is None:
+            return {
+                "status": "skipped",
+                "message": "Redis client not configured",
+                "response_time_ms": 0
+            }
+        
         try:
             await self.redis_client.ping()
             

@@ -13,7 +13,7 @@ from typing import Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from deerteamx.models.execution import Execution
+from deerteamx.models.base import Execution
 from deerteamx.graph.builder import StaticTeamGraphBuilder
 
 logger = logging.getLogger(__name__)

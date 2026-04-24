@@ -55,12 +55,12 @@ async def lifespan(app: FastAPI):
             try:
                 from deerteamx.utils.config_validator import run_startup_validation
                 from deerteamx.database.session import async_session_maker
-                from deerteamx.core.runtime.lock_manager import get_redis_client
                 
-                redis_client = get_redis_client()
+                # For now, skip Redis validation as it's not implemented yet
+                # TODO: Add Redis support when needed
                 await run_startup_validation(
                     db_session_factory=async_session_maker,
-                    redis_client=redis_client,
+                    redis_client=None,
                     settings=settings,
                     fail_on_critical=True,
                 )

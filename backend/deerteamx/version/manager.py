@@ -9,8 +9,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from deerteamx.models.version import TeamVersion
-from deerteamx.models.team import Team
+from deerteamx.models.base import TeamVersion, Team
 
 logger = logging.getLogger(__name__)
 

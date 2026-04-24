@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deerteamx.database import get_db
+from deerteamx.database.session import get_db
 from deerteamx.version.manager import VersionManager
 from deerteamx.version.diff import DiffEngine
 

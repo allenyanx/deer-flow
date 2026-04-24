@@ -10,7 +10,6 @@ from typing import Dict, Any
 
 from deerteamx.config.settings import get_settings, DeerTeamXSettings
 from deerteamx.utils.config_validator import ConfigValidator
-from deerteamx.api.dependencies import get_db_session_factory, get_redis_client
 
 router = APIRouter(
     prefix="/config",
@@ -136,13 +135,11 @@ async def health_check(
         - 200: All critical services healthy
         - 503: One or more critical services unavailable
     """
-    from deerteamx.database.session import get_async_session
-    from deerteamx.core.runtime.lock_manager import get_redis_client
+    from deerteamx.database.session import async_session_maker
     
-    db_session_factory = get_async_session()
-    redis_client = get_redis_client()
-    
-    validator = ConfigValidator(db_session_factory, redis_client, settings)
+    # For now, skip Redis validation as it's not implemented yet
+    # TODO: Add Redis support when needed
+    validator = ConfigValidator(async_session_maker, None, settings)
     report = await validator.validate_all()
     
     # Determine HTTP status code
@@ -163,13 +160,11 @@ async def validate_configuration(
     Returns:
         Detailed validation report with warnings and errors
     """
-    from deerteamx.database.session import get_async_session
-    from deerteamx.core.runtime.lock_manager import get_redis_client
+    from deerteamx.database.session import async_session_maker
     
-    db_session_factory = get_async_session()
-    redis_client = get_redis_client()
-    
-    validator = ConfigValidator(db_session_factory, redis_client, settings)
+    # For now, skip Redis validation as it's not implemented yet
+    # TODO: Add Redis support when needed
+    validator = ConfigValidator(async_session_maker, None, settings)
     report = await validator.validate_all()
     
     return {

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 from deerteamx.runtime.executor import TeamExecutor
-from deerteamx.models.execution import Execution
+from deerteamx.models.base import Execution
 
 
 class TestTeamExecutor:

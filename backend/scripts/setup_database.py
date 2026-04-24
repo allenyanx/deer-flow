@@ -21,7 +21,6 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 
 # Add backend directory to Python path
@@ -29,7 +28,7 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 
-def run_command(cmd: list[str], description: str, dry_run: bool = False) -> bool:
+def run_command(cmd: list[str], description: str, dry_run: bool = False, env: dict = None) -> bool:
     """Run a shell command with error handling."""
     print(f"\n🔧 {description}")
     print(f"   Command: {' '.join(cmd)}")
@@ -44,7 +43,8 @@ def run_command(cmd: list[str], description: str, dry_run: bool = False) -> bool
             check=True,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=env or os.environ
         )
         if result.stdout:
             print(f"   ✅ Success: {result.stdout.strip()}")
@@ -78,11 +78,13 @@ def check_postgres_connection() -> bool:
     
     # Try connecting via psql using the configured DATABASE_URL
     try:
+        # Use -U flag to explicitly specify the username from DATABASE_URL
         result = subprocess.run(
-            ["psql", settings.DATABASE_URL, "-c", "SELECT 1;"],
+            ["psql", "-U", db_user, "-h", host, "-p", str(port), "-d", "postgres", "-c", "SELECT 1;"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            env={**os.environ, "PGPASSWORD": parsed.password or "deerteamx_password"}
         )
         if result.returncode == 0:
             print("   ✅ PostgreSQL is accessible")
@@ -152,11 +154,37 @@ def create_user(dry_run: bool = False) -> bool:
         sql_file = f.name
     
     try:
-        cmd = ["psql", settings.DATABASE_URL, "-f", sql_file]
-        success = run_command(cmd, f"Creating PostgreSQL user '{db_user}'", dry_run)
+        # Try multiple authentication methods for PostgreSQL superuser
+        env = os.environ.copy()
+        
+        # Method 1: Use POSTGRES_PASSWORD from environment if available
+        postgres_pass = os.environ.get("POSTGRES_PASSWORD", "postgres")
+        
+        cmd = [
+            "psql", "-h", db_host, "-p", str(db_port),
+            "-U", "postgres", "-d", "postgres", "-f", sql_file
+        ]
+        
+        # Try with default 'postgres' password first
+        env["PGPASSWORD"] = postgres_pass
+        success = run_command(cmd, f"Creating PostgreSQL user '{db_user}'", dry_run, env)
+        
+        # If failed and password is 'postgres', try without password (peer auth)
+        if not success and postgres_pass == "postgres":
+            print(f"   ℹ️  Trying peer authentication (no password)...")
+            env_no_pass = os.environ.copy()
+            if "PGPASSWORD" in env_no_pass:
+                del env_no_pass["PGPASSWORD"]
+            success = run_command(cmd, f"Creating PostgreSQL user '{db_user}' (peer auth)", dry_run, env_no_pass)
+        
+        # If still failed, provide helpful guidance
+        if not success:
+            print(f"\n   💡 To manually create the user, run:")
+            print(f"      psql -h {db_host} -p {db_port} -U postgres -c \"CREATE ROLE {db_user} WITH LOGIN PASSWORD '{db_pass}';\"")
+            print(f"   Or set POSTGRES_PASSWORD environment variable to your PostgreSQL superuser password")
+        
         return success
     finally:
-        import os
         os.unlink(sql_file)
 
 
@@ -171,25 +199,47 @@ def create_database(dry_run: bool = False) -> bool:
         db_name = parsed.path.lstrip('/')
         if not db_name:
             db_name = "deerteamx_db"
+        db_user = parsed.username or "postgres"
+        db_pass = parsed.password or "postgres"
+        db_host = parsed.hostname or "localhost"
+        db_port = parsed.port or 5432
     except Exception:
         db_name = "deerteamx_db"
+        db_user = "postgres"
+        db_pass = "postgres"
+        db_host = "localhost"
+        db_port = 5432
 
+    # Create database using DO block for idempotent execution
     sql = f"""
-    SELECT 'CREATE DATABASE {db_name}'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{db_name}')\gexec
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '{db_name}') THEN
+            EXECUTE 'CREATE DATABASE {db_name}';
+            RAISE NOTICE 'Database created';
+        ELSE
+            RAISE NOTICE 'Database already exists';
+        END IF;
+    END
+    $$;
     """
     
-    # Note: This needs superuser privileges. For Docker PostgreSQL,
-    # the default user usually has these privileges.
-    # We'll execute this on the 'postgres' database first
-    try:
-        parsed = urlparse(settings.DATABASE_URL)
-        base_url = f"postgresql://{parsed.username}:{parsed.password}@{parsed.hostname}:{parsed.port}/postgres"
-    except Exception:
-        base_url = "postgresql://postgres:postgres@localhost:5433/postgres"
+    # Write SQL to temp file to avoid shell escaping issues
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+        f.write(sql)
+        sql_file = f.name
     
-    cmd = ["psql", base_url, "-c", sql]
-    return run_command(cmd, f"Creating database '{db_name}'", dry_run)
+    try:
+        # Use PGPASSWORD environment variable for authentication
+        env = os.environ.copy()
+        env["PGPASSWORD"] = db_pass
+        
+        cmd = ["psql", "-h", db_host, "-p", str(db_port), 
+               "-U", db_user, "-d", "postgres", "-f", sql_file]
+        return run_command(cmd, f"Creating database '{db_name}'", dry_run, env)
+    finally:
+        os.unlink(sql_file)
 
 
 def grant_privileges(dry_run: bool = False) -> bool:
@@ -201,37 +251,51 @@ def grant_privileges(dry_run: bool = False) -> bool:
     try:
         parsed = urlparse(settings.DATABASE_URL)
         db_user = parsed.username or "deerteamx_user"
+        db_pass = parsed.password or "deerteamx_password"
         db_name = parsed.path.lstrip('/') or "deerteamx_db"
+        db_host = parsed.hostname or "localhost"
+        db_port = parsed.port or 5432
     except Exception:
         db_user = "deerteamx_user"
+        db_pass = "deerteamx_password"
         db_name = "deerteamx_db"
+        db_host = "localhost"
+        db_port = 5432
 
     commands = [
         (
-            ["psql", settings.DATABASE_URL, "-c", 
+            ["psql", "-h", db_host, "-p", str(db_port),
+             "-U", db_user, "-d", db_name, "-c",
              f"GRANT ALL PRIVILEGES ON DATABASE {db_name} TO {db_user};"],
             "Granting database privileges"
         ),
         (
-            ["psql", settings.DATABASE_URL, "-c",
+            ["psql", "-h", db_host, "-p", str(db_port),
+             "-U", db_user, "-d", db_name, "-c",
              f"GRANT ALL ON SCHEMA public TO {db_user};"],
             "Granting schema privileges"
         ),
         (
-            ["psql", settings.DATABASE_URL, "-c",
+            ["psql", "-h", db_host, "-p", str(db_port),
+             "-U", db_user, "-d", db_name, "-c",
              f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {db_user};"],
             "Setting default table privileges"
         ),
         (
-            ["psql", settings.DATABASE_URL, "-c",
+            ["psql", "-h", db_host, "-p", str(db_port),
+             "-U", db_user, "-d", db_name, "-c",
              f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {db_user};"],
             "Setting default sequence privileges"
         ),
     ]
     
+    # Set password environment variable
+    env = os.environ.copy()
+    env["PGPASSWORD"] = db_pass
+    
     all_success = True
     for cmd, description in commands:
-        if not run_command(cmd, description, dry_run):
+        if not run_command(cmd, description, dry_run, env):
             all_success = False
     
     return all_success
