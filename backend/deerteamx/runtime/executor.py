@@ -115,12 +115,15 @@ class TeamExecutor:
             # 提取统计信息（此处简化，实际应从 Middleware 或 State 中提取 Token 消耗）
             token_stats = self._extract_token_stats(result)
 
+            # 序列化输出数据（将 LangChain 消息对象转换为字典）
+            serialized_result = self._serialize_execution_result(result)
+
             # 更新状态为 completed
             await self._update_status(
                 execution_id, 
                 "completed", 
-                output_data=result,
-                execution_order=result.get("execution_order", []),
+                output_data=serialized_result,
+                execution_order=serialized_result.get("execution_order", []),
                 **token_stats
             )
 
@@ -156,10 +159,103 @@ class TeamExecutor:
             .values(**update_data)
         )
         
-        # 使用独立事务块，确保原子性
-        # 使用 nested=True 允许在已有事务中创建子事务
-        async with self.db.begin_nested():
-            await self.db.execute(stmt)
+        # 直接执行更新，由外层事务管理（避免嵌套事务导致的问题）
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+    @staticmethod
+    def _serialize_message(msg) -> dict:
+        """将 LangChain 消息对象序列化为字典。
+        
+        Args:
+            msg: HumanMessage/AIMessage/ToolMessage/SystemMessage 对象
+            
+        Returns:
+            可 JSON 序列化的字典
+        """
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+        
+        if isinstance(msg, HumanMessage):
+            return {
+                "type": "human",
+                "content": msg.content,
+                "id": getattr(msg, "id", None),
+            }
+        elif isinstance(msg, AIMessage):
+            result = {
+                "type": "ai",
+                "content": msg.content,
+                "id": getattr(msg, "id", None),
+            }
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                result["tool_calls"] = [
+                    {
+                        "name": tc.get("name"),
+                        "args": tc.get("args"),
+                        "id": tc.get("id"),
+                    }
+                    for tc in msg.tool_calls
+                ]
+            if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                result["usage_metadata"] = msg.usage_metadata
+            return result
+        elif isinstance(msg, ToolMessage):
+            return {
+                "type": "tool",
+                "content": msg.content,
+                "name": getattr(msg, "name", None),
+                "tool_call_id": getattr(msg, "tool_call_id", None),
+                "id": getattr(msg, "id", None),
+            }
+        elif isinstance(msg, SystemMessage):
+            return {
+                "type": "system",
+                "content": msg.content,
+                "id": getattr(msg, "id", None),
+            }
+        else:
+            # 未知类型，转为字符串
+            return {
+                "type": "unknown",
+                "content": str(msg),
+            }
+
+    @staticmethod
+    def _serialize_execution_result(result: dict) -> dict:
+        """序列化执行结果，确保所有字段都可 JSON 序列化。
+        
+        Args:
+            result: LangGraph 执行结果
+            
+        Returns:
+            可 JSON 序列化的字典
+        """
+        if not result:
+            return {}
+        
+        serialized = {}
+        
+        for key, value in result.items():
+            if key == "messages" and isinstance(value, list):
+                # 序列化消息列表
+                serialized[key] = [
+                    TeamExecutor._serialize_message(msg) if hasattr(msg, "content") else msg
+                    for msg in value
+                ]
+            elif key == "task_outputs" and isinstance(value, dict):
+                # 递归序列化 task_outputs
+                serialized_task_outputs = {}
+                for task_id, task_result in value.items():
+                    if isinstance(task_result, dict):
+                        serialized_task_outputs[task_id] = TeamExecutor._serialize_execution_result(task_result)
+                    else:
+                        serialized_task_outputs[task_id] = task_result
+                serialized[key] = serialized_task_outputs
+            else:
+                # 其他字段直接复制
+                serialized[key] = value
+        
+        return serialized
 
     @staticmethod
     def _extract_token_stats(result: dict) -> dict:

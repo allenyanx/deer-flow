@@ -50,7 +50,21 @@ class StaticTeamGraphBuilder:
         self.gateway_url = gateway_url
 
     def build(self) -> Any:
-        """构建并编译完整的 StateGraph（方案 A：以 Task 为节点）。"""
+        """构建并编译完整的 StateGraph（方案 A：以 Task 为节点）。
+        
+        Raises:
+            ValueError: 当检测到循环依赖时抛出异常，包含详细的循环路径信息
+        """
+        # 0. 检测循环依赖（在构建图之前主动检测）
+        cycle = self._detect_circular_dependencies()
+        if cycle:
+            cycle_path = " -> ".join(cycle + [cycle[0]])
+            raise ValueError(
+                f"检测到循环依赖：{cycle_path}。\n"
+                f"循环依赖会导致执行死锁，请调整任务依赖关系。\n"
+                f"建议：删除 '{cycle[-1]}' → '{cycle[0]}' 的依赖连线可解除循环"
+            )
+        
         workflow = StateGraph(TeamState)
 
         # 1. 注册任务节点（每个任务对应一个节点）
@@ -63,6 +77,9 @@ class StaticTeamGraphBuilder:
 
         # 3. 设置入口点（支持多个并行入口）
         entry_tasks = self._find_entry_tasks()
+        if not entry_tasks:
+            logger.warning("未找到入口任务（所有任务都有依赖），这可能导致图无法执行")
+        
         for entry_task_id in entry_tasks:
             workflow.add_edge("__start__", entry_task_id)
 
@@ -206,3 +223,66 @@ class StaticTeamGraphBuilder:
             if not task.get("dependencies", []):
                 entry_tasks.append(task["task_id"])
         return entry_tasks
+    
+    def _detect_circular_dependencies(self) -> Optional[List[str]]:
+        """使用 DFS 算法检测循环依赖。
+        
+        Returns:
+            如果存在循环依赖，返回循环路径中的任务 ID 列表；否则返回 None
+            
+        Algorithm:
+            - 时间复杂度：O(V + E)，其中 V 是任务数，E 是依赖边数
+            - 空间复杂度：O(V) 用于存储访问状态
+            - 使用三色标记法：WHITE(未访问)、GRAY(访问中)、BLACK(已完成)
+        """
+        # 构建邻接表：task_id -> [dependency_ids]
+        graph = {task["task_id"]: task.get("dependencies", []) for task in self.tasks}
+        
+        # 三色标记：0=WHITE(未访问), 1=GRAY(访问中), 2=BLACK(已完成)
+        color = {task_id: 0 for task_id in graph}
+        parent = {task_id: None for task_id in graph}  # 记录 DFS 树中的父节点
+        
+        cycle_path = []
+        
+        def dfs(node: str) -> bool:
+            """深度优先搜索检测环。
+            
+            Args:
+                node: 当前访问的任务 ID
+                
+            Returns:
+                True 如果检测到循环依赖，False 否则
+            """
+            color[node] = 1  # 标记为访问中（GRAY）
+            
+            for neighbor in graph.get(node, []):
+                # 检查邻居是否存在于图中（防御性编程）
+                if neighbor not in graph:
+                    logger.warning(f"任务 '{node}' 依赖不存在的任务 '{neighbor}'，已忽略")
+                    continue
+                
+                if color[neighbor] == 0:  # WHITE: 未访问
+                    parent[neighbor] = node
+                    if dfs(neighbor):
+                        return True
+                elif color[neighbor] == 1:  # GRAY: 访问中 → 发现回边（循环）
+                    # 重构循环路径：从 neighbor 到 node 的路径
+                    path = [neighbor]
+                    current = node
+                    while current != neighbor:
+                        path.append(current)
+                        current = parent[current]
+                    path.reverse()
+                    cycle_path.extend(path)
+                    return True
+            
+            color[node] = 2  # 标记为已完成（BLACK）
+            return False
+        
+        # 对所有未访问的节点执行 DFS（处理非连通图）
+        for task_id in graph:
+            if color[task_id] == 0:
+                if dfs(task_id):
+                    return cycle_path
+        
+        return None

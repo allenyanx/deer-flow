@@ -283,17 +283,120 @@ class TestStaticTeamGraphBuilder:
         """TC-EXEC-004: 测试循环依赖检测（方案 A）
         
         验证点：
-        - 循环依赖不会导致无限递归
-        - _find_entry_tasks 能正确处理循环依赖（返回空列表）
+        - 循环依赖会被主动检测并抛出 ValueError
+        - 错误信息包含详细的循环路径
+        - build() 方法在检测到循环依赖时不会继续构建图
         """
         # Arrange: 创建 Builder
         builder = StaticTeamGraphBuilder(circular_dependency_config)
         
-        # Act & Assert: 验证循环依赖处理
-        # 由于 task_a 依赖 task_b，task_b 依赖 task_a，没有真正的入口点
-        entry_tasks = builder._find_entry_tasks()
+        # Act & Assert: 验证循环依赖被检测并抛出异常
+        with pytest.raises(ValueError) as exc_info:
+            builder.build()
         
-        assert entry_tasks == []
+        # 验证错误信息包含循环路径
+        error_message = str(exc_info.value)
+        assert "检测到循环依赖" in error_message
+        assert "task_a" in error_message
+        assert "task_b" in error_message
+        assert "建议：删除" in error_message  # 包含解除建议
+    
+    @pytest.mark.asyncio
+    async def test_complex_circular_dependency(self):
+        """测试复杂循环依赖（3个任务形成环）
+        
+        验证点：
+        - task_a -> task_b -> task_c -> task_a 的循环能被检测
+        - 错误信息展示完整循环路径
+        """
+        # Arrange: 创建三任务循环配置
+        complex_cycle_config = {
+            "name": "复杂循环团队",
+            "execution_mode": "static",
+            "roles": [
+                {"role_id": "r1", "agent_name": "a1", "name": "R1", "goal": "G1", "model": "gpt-4"},
+                {"role_id": "r2", "agent_name": "a2", "name": "R2", "goal": "G2", "model": "gpt-4"},
+                {"role_id": "r3", "agent_name": "a3", "name": "R3", "goal": "G3", "model": "gpt-4"}
+            ],
+            "tasks": [
+                {"task_id": "task_a", "description": "A", "expected_output": "O", "assigned_role": "r1", "dependencies": ["task_c"]},
+                {"task_id": "task_b", "description": "B", "expected_output": "O", "assigned_role": "r2", "dependencies": ["task_a"]},
+                {"task_id": "task_c", "description": "C", "expected_output": "O", "assigned_role": "r3", "dependencies": ["task_b"]}
+            ],
+            "global_settings": {"process_type": "sequential"}
+        }
+        
+        builder = StaticTeamGraphBuilder(complex_cycle_config)
+        
+        # Act & Assert
+        with pytest.raises(ValueError) as exc_info:
+            builder.build()
+        
+        error_message = str(exc_info.value)
+        assert "检测到循环依赖" in error_message
+        # 验证三个任务都在循环路径中
+        assert "task_a" in error_message
+        assert "task_b" in error_message
+        assert "task_c" in error_message
+    
+    @pytest.mark.asyncio
+    async def test_no_circular_dependency(self, sample_team_config):
+        """测试无循环依赖的正常配置
+        
+        验证点：
+        - 正常 DAG 配置能成功构建图
+        - _detect_circular_dependencies 返回 None
+        """
+        # Arrange
+        builder = StaticTeamGraphBuilder(sample_team_config)
+        
+        # Act
+        cycle = builder._detect_circular_dependencies()
+        
+        # Assert
+        assert cycle is None
+        
+        # 验证图能成功构建
+        workflow = builder.build()
+        assert workflow is not None
+    
+    @pytest.mark.asyncio
+    async def test_multiple_independent_cycles(self):
+        """测试多个独立循环（非连通图）
+        
+        验证点：
+        - 检测到第一个循环即停止并返回
+        - 不会无限递归
+        """
+        # Arrange: 两个独立的循环
+        multi_cycle_config = {
+            "name": "多循环团队",
+            "execution_mode": "static",
+            "roles": [
+                {"role_id": "r1", "agent_name": "a1", "name": "R1", "goal": "G1", "model": "gpt-4"},
+                {"role_id": "r2", "agent_name": "a2", "name": "R2", "goal": "G2", "model": "gpt-4"},
+                {"role_id": "r3", "agent_name": "a3", "name": "R3", "goal": "G3", "model": "gpt-4"},
+                {"role_id": "r4", "agent_name": "a4", "name": "R4", "goal": "G4", "model": "gpt-4"}
+            ],
+            "tasks": [
+                # 循环 1: task_a <-> task_b
+                {"task_id": "task_a", "description": "A", "expected_output": "O", "assigned_role": "r1", "dependencies": ["task_b"]},
+                {"task_id": "task_b", "description": "B", "expected_output": "O", "assigned_role": "r2", "dependencies": ["task_a"]},
+                # 循环 2: task_c <-> task_d
+                {"task_id": "task_c", "description": "C", "expected_output": "O", "assigned_role": "r3", "dependencies": ["task_d"]},
+                {"task_id": "task_d", "description": "D", "expected_output": "O", "assigned_role": "r4", "dependencies": ["task_c"]}
+            ],
+            "global_settings": {"process_type": "sequential"}
+        }
+        
+        builder = StaticTeamGraphBuilder(multi_cycle_config)
+        
+        # Act & Assert: 应该检测到至少一个循环
+        with pytest.raises(ValueError) as exc_info:
+            builder.build()
+        
+        error_message = str(exc_info.value)
+        assert "检测到循环依赖" in error_message
     
     @pytest.mark.asyncio
     async def test_dynamic_trigger_conditional_edges(self, dynamic_trigger_config):
@@ -322,6 +425,8 @@ class TestStaticTeamGraphBuilder:
         - _build_task_context 正确拼接前置任务输出
         - 包含角色名称、目标和当前任务描述
         """
+        from langchain_core.messages import AIMessage
+        
         # Arrange: 创建 Builder 和模拟状态
         builder = StaticTeamGraphBuilder(sample_team_config)
         mock_state = {
@@ -329,7 +434,7 @@ class TestStaticTeamGraphBuilder:
             "current_task": "review-task",
             "task_outputs": {
                 "analysis-task": {
-                    "messages": [{"role": "assistant", "content": "分析结果：销售额增长20%"}]
+                    "messages": [AIMessage(content="分析结果：销售额增长20%")]
                 }
             },
             "completed_tasks": ["analysis-task"]
