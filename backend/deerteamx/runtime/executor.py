@@ -7,7 +7,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,9 +117,9 @@ class TeamExecutor:
         update_data = {"status": status}
         
         if status == "running":
-            update_data["started_at"] = datetime.utcnow()
+            update_data["started_at"] = datetime.now(timezone.utc)
         elif status in ["completed", "failed", "cancelled"]:
-            update_data["completed_at"] = datetime.utcnow()
+            update_data["completed_at"] = datetime.now(timezone.utc)
             
         update_data.update(kwargs)
 
@@ -129,7 +129,9 @@ class TeamExecutor:
             .values(**update_data)
         )
         
-        async with self.db.begin():
+        # 使用独立事务块，确保原子性
+        # 使用 nested=True 允许在已有事务中创建子事务
+        async with self.db.begin_nested():
             await self.db.execute(stmt)
 
     @staticmethod

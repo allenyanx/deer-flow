@@ -122,28 +122,18 @@ class TestTeamExecutor:
         db_session.add(incomplete_team)
         await db_session.commit()
         
-        # Act & Assert: 验证配置校验应在 execute_team 内部进行
-        # 注意：当前实现未在 execute_team 中校验配置完整性
-        # 此测试用例需要在业务逻辑中添加校验后才能通过
-        # 这里先验证执行可以启动（后续由 _run_execution 失败）
+        # Act & Assert: 验证配置校验在 execute_team 中进行
         input_data = {"query": "test"}
         team_config = incomplete_team.config_snapshot
         
-        # 当前实现不会在 execute_team 阶段校验，而是异步执行时失败
-        execution_id = await executor.execute_team(
-            team_id=incomplete_team.team_id,
-            team_config=team_config,
-            input_data=input_data,
-            user_id=str(test_user.user_id)
-        )
-        
-        # 验证执行记录已创建（状态为 pending）
-        stmt = select(Execution).where(Execution.execution_id == execution_id)
-        result = await executor.db.execute(stmt)
-        execution = result.scalar_one_or_none()
-        
-        assert execution is not None
-        assert execution.status == "pending"
+        # 当前实现在 execute_team 阶段就会校验配置完整性并抛出异常
+        with pytest.raises(ValueError, match="INCOMPLETE_CONFIG"):
+            await executor.execute_team(
+                team_id=incomplete_team.team_id,
+                team_config=team_config,
+                input_data=input_data,
+                user_id=str(test_user.user_id)
+            )
     
     @pytest.mark.asyncio
     async def test_execute_team_with_mocked_graph(self, executor: TeamExecutor, sample_team: Team, test_user: User):
@@ -201,11 +191,13 @@ class TestTeamExecutor:
         input_data = {"query": "分析数据"}
         execution_count = 3
         execution_orders = []
+        team_config = sample_team.config_snapshot
         
         # Act: 执行多次并记录 execution_order
         for _ in range(execution_count):
             execution_id = await executor.execute_team(
                 team_id=sample_team.team_id,
+                team_config=team_config,
                 input_data=input_data,
                 user_id=str(test_user.user_id)
             )
@@ -377,8 +369,10 @@ class TestTeamExecutor:
         
         # Act: 触发执行
         input_data = {"query": "复杂数据分析"}
+        team_config = hybrid_team.config_snapshot
         execution_id = await executor.execute_team(
             team_id=hybrid_team.team_id,
+            team_config=team_config,
             input_data=input_data,
             user_id=str(test_user.user_id)
         )
@@ -390,6 +384,10 @@ class TestTeamExecutor:
         
         assert execution is not None
         # 注意：实际动态子代理生成需要在执行过程中触发，这里仅验证执行启动
+        
+        # 等待一小段时间，让后台任务有机会启动，避免 session 关闭冲突
+        import asyncio
+        await asyncio.sleep(0.5)
     
     @pytest.mark.asyncio
     async def test_get_execution(self, executor: TeamExecutor, sample_team: Team, test_user: User):
@@ -402,12 +400,15 @@ class TestTeamExecutor:
         # Arrange: 创建执行记录
         input_data = {"query": "test"}
         team_config = sample_team.config_snapshot
-        execution_id = await executor.execute_team(
-            team_id=sample_team.team_id,
-            team_config=team_config,
-            input_data=input_data,
-            user_id=str(test_user.user_id)
-        )
+        
+        # Mock 掉后台任务，避免 session 关闭冲突
+        with patch('asyncio.create_task'):
+            execution_id = await executor.execute_team(
+                team_id=sample_team.team_id,
+                team_config=team_config,
+                input_data=input_data,
+                user_id=str(test_user.user_id)
+            )
         
         # Act: 查询执行详情
         execution = await executor.get_execution(execution_id)
@@ -490,16 +491,21 @@ class TestTeamExecutor:
         
         # Act: 触发执行
         input_data = {"query": "审查代码"}
-        execution_id = await executor.execute_team(
-            team_id=feedback_team.team_id,
-            input_data=input_data,
-            user_id=str(test_user.user_id)
-        )
+        team_config = feedback_team.config_snapshot
         
-        # Assert: 验证执行在审批点暂停
+        # Mock 掉后台任务，避免 session 关闭冲突
+        with patch('asyncio.create_task'):
+            execution_id = await executor.execute_team(
+                team_id=feedback_team.team_id,
+                team_config=team_config,
+                input_data=input_data,
+                user_id=str(test_user.user_id)
+            )
+        
+        # Assert: 验证执行记录已创建
         stmt = select(Execution).where(Execution.execution_id == execution_id)
         result = await executor.db.execute(stmt)
         execution = result.scalar_one_or_none()
         
-        # 注意：实际审批流程需要在执行过程中触发，这里仅验证执行启动
         assert execution is not None
+        assert execution.status == "pending"

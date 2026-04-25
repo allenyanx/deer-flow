@@ -37,13 +37,13 @@ def test_settings():
     return get_settings()
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def test_engine(test_settings):
-    """创建测试数据库引擎 (session 级别，所有测试共享)
+    """创建测试数据库引擎 (function 级别，每个测试独立)
     
     生命周期:
-    - 测试会话开始时: 创建引擎并初始化表结构
-    - 测试会话结束时: 删除所有表并关闭引擎
+    - 测试开始时: 创建引擎并初始化表结构
+    - 测试结束时: 删除所有表并关闭引擎
     
     Args:
         test_settings: 测试配置
@@ -65,10 +65,7 @@ async def test_engine(test_settings):
     
     yield engine
     
-    # 清理：删除所有表
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    
+    # 清理：关闭引擎（不删除表，保留测试数据以便调试）
     await engine.dispose()
 
 
@@ -152,8 +149,8 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         try:
             yield session
-            # await session.rollback()  # 测试结束后回滚所有更改
         finally:
+            await session.rollback()  # 测试结束后回滚所有更改
             await session.close()
 
 
