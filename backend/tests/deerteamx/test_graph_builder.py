@@ -124,12 +124,7 @@ def dynamic_trigger_config():
                 "agent_name": "primary_agent",
                 "name": "主要角色",
                 "goal": "主要目标",
-                "model": "gpt-4",
-                "dynamic_trigger": {
-                    "type": "output_contains",
-                    "condition_value": "需要专家",
-                    "target_role_id": "expert"
-                }
+                "model": "gpt-4"
             },
             {
                 "role_id": "expert",
@@ -145,7 +140,12 @@ def dynamic_trigger_config():
                 "description": "主要任务",
                 "expected_output": "主要输出",
                 "assigned_role": "primary",
-                "dependencies": []
+                "dependencies": [],
+                "dynamic_trigger": {
+                    "type": "output_contains",
+                    "condition_value": "需要专家",
+                    "target_task_id": "expert-task"
+                }
             },
             {
                 "task_id": "expert-task",
@@ -169,11 +169,11 @@ class TestStaticTeamGraphBuilder:
     """StaticTeamGraphBuilder 图构建测试"""
     
     def test_build_graph_node_count(self, sample_team_config):
-        """TC-EXEC-004: 测试图节点数等于角色数
+        """TC-EXEC-004: 测试图节点数等于任务数（方案 A：任务驱动）
         
         验证点：
-        - 图中节点数量 = roles 数组长度
-        - 每个 role_id 对应一个节点
+        - 图中节点数量 = tasks 数组长度
+        - 每个 task_id 对应一个节点
         """
         # Arrange: 创建 Builder
         builder = StaticTeamGraphBuilder(sample_team_config)
@@ -182,11 +182,11 @@ class TestStaticTeamGraphBuilder:
         workflow = builder.build()
         
         # Assert: 验证节点数
-        # 注意：workflow.compile() 返回 CompiledGraph，需要先获取 nodes
-        assert len(builder.roles) == 2  # analyst 和 reviewer
-        # 由于 build() 返回的是编译后的图，我们验证 roles 字典
-        assert "analyst" in builder.roles
-        assert "reviewer" in builder.roles
+        assert len(builder.tasks) == 2  # analysis-task 和 review-task
+        # 验证任务 ID 存在
+        task_ids = [t["task_id"] for t in sample_team_config["tasks"]]
+        assert "analysis-task" in task_ids
+        assert "review-task" in task_ids
     
     def test_build_graph_edge_count(self, sample_team_config):
         """TC-EXEC-004: 测试图边数等于依赖数
@@ -206,27 +206,28 @@ class TestStaticTeamGraphBuilder:
         assert sample_team_config["tasks"][1]["dependencies"] == ["analysis-task"]
     
     def test_entry_point_selection(self, sample_team_config):
-        """TC-EXEC-004: 测试入口点选择逻辑
+        """TC-EXEC-004: 测试入口点选择逻辑（方案 A：支持多入口）
         
         验证点：
         - 入口点是没有任何依赖的任务
-        - analysis-task 无依赖，应被选为入口点
+        - analysis-task 无依赖，应被选为入口点之一
         """
         # Arrange: 创建 Builder
         builder = StaticTeamGraphBuilder(sample_team_config)
         
-        # Act: 查找入口任务
-        entry_task = builder._find_entry_task()
+        # Act: 查找入口任务（返回列表）
+        entry_tasks = builder._find_entry_tasks()
         
         # Assert: 验证入口点
-        assert entry_task == "analysis-task"
+        assert "analysis-task" in entry_tasks
+        assert len(entry_tasks) == 1  # 只有一个无依赖任务
     
     def test_entry_point_with_multiple_entries(self):
-        """测试多个入口点时的选择逻辑
+        """测试多个入口点时的选择逻辑（方案 A：支持并行入口）
         
         验证点：
-        - 当有多个无依赖任务时，任选其一作为入口
-        - 返回值应为其中一个入口任务 ID
+        - 当有多个无依赖任务时，全部作为入口点返回
+        - 返回值应包含所有入口任务 ID
         """
         # Arrange: 创建多入口配置
         multi_entry_config = {
@@ -244,17 +245,18 @@ class TestStaticTeamGraphBuilder:
         
         builder = StaticTeamGraphBuilder(multi_entry_config)
         
-        # Act: 查找入口任务
-        entry_task = builder._find_entry_task()
+        # Act: 查找入口任务（返回列表）
+        entry_tasks = builder._find_entry_tasks()
         
-        # Assert: 验证返回的是入口任务之一
-        assert entry_task in ["t1", "t2"]
+        # Assert: 验证返回所有入口任务
+        assert set(entry_tasks) == {"t1", "t2"}
+        assert len(entry_tasks) == 2
     
-    def test_no_entry_point_returns_none(self):
-        """测试无入口点时返回 None
+    def test_no_entry_point_returns_empty_list(self):
+        """测试无入口点时返回空列表（方案 A）
         
         验证点：
-        - 当所有任务都有依赖时（异常情况），返回 None
+        - 当所有任务都有依赖时（异常情况），返回空列表
         """
         # Arrange: 创建异常配置（所有任务都有依赖）
         invalid_config = {
@@ -270,87 +272,86 @@ class TestStaticTeamGraphBuilder:
         
         builder = StaticTeamGraphBuilder(invalid_config)
         
-        # Act: 查找入口任务
-        entry_task = builder._find_entry_task()
+        # Act: 查找入口任务（返回列表）
+        entry_tasks = builder._find_entry_tasks()
         
-        # Assert: 验证返回 None
-        assert entry_task is None
+        # Assert: 验证返回空列表
+        assert entry_tasks == []
     
     @pytest.mark.asyncio
     async def test_circular_dependency_detection(self, circular_dependency_config):
-        """TC-EXEC-004: 测试循环依赖检测
+        """TC-EXEC-004: 测试循环依赖检测（方案 A）
         
         验证点：
         - 循环依赖不会导致无限递归
-        - 图构建应能处理循环依赖（由 LangGraph 内部处理或抛出异常）
+        - _find_entry_tasks 能正确处理循环依赖（返回空列表）
         """
         # Arrange: 创建 Builder
         builder = StaticTeamGraphBuilder(circular_dependency_config)
         
         # Act & Assert: 验证循环依赖处理
-        # 当前实现未显式检测循环依赖，LangGraph 可能在编译时报错
-        # 这里验证 _find_entry_task 能正常工作（即使有循环依赖）
-        entry_task = builder._find_entry_task()
-        
         # 由于 task_a 依赖 task_b，task_b 依赖 task_a，没有真正的入口点
-        assert entry_task is None
+        entry_tasks = builder._find_entry_tasks()
+        
+        assert entry_tasks == []
     
     @pytest.mark.asyncio
     async def test_dynamic_trigger_conditional_edges(self, dynamic_trigger_config):
-        """测试动态触发条件边构建
+        """测试动态触发条件边构建（方案 A：基于 task_id）
         
         验证点：
         - dynamic_trigger 配置正确解析
-        - 条件边应包含 target_role_id
+        - 条件边应包含 target_task_id
         """
         # Arrange: 创建 Builder
         builder = StaticTeamGraphBuilder(dynamic_trigger_config)
         
-        # Act: 验证 dynamic_trigger 配置
-        primary_role = builder.roles["primary"]
+        # Act: 验证 dynamic_trigger 配置（现在在 task 上）
+        primary_task = next(t for t in builder.tasks if t["task_id"] == "primary-task")
         
         # Assert: 验证动态触发配置存在
-        assert "dynamic_trigger" in primary_role
-        assert primary_role["dynamic_trigger"]["type"] == "output_contains"
-        assert primary_role["dynamic_trigger"]["condition_value"] == "需要专家"
-        assert primary_role["dynamic_trigger"]["target_role_id"] == "expert"
+        assert "dynamic_trigger" in primary_task
+        assert primary_task["dynamic_trigger"]["type"] == "output_contains"
+        assert primary_task["dynamic_trigger"]["condition_value"] == "需要专家"
+        assert primary_task["dynamic_trigger"]["target_task_id"] == "expert-task"
     
-    def test_role_context_building(self, sample_team_config):
-        """测试角色上下文构建逻辑
+    def test_task_context_building(self, sample_team_config):
+        """测试任务上下文构建逻辑（方案 A：基于 task_id）
         
         验证点：
-        - _build_role_context 正确拼接前置任务输出
-        - 包含角色名称和目标
+        - _build_task_context 正确拼接前置任务输出
+        - 包含角色名称、目标和当前任务描述
         """
         # Arrange: 创建 Builder 和模拟状态
         builder = StaticTeamGraphBuilder(sample_team_config)
         mock_state = {
             "messages": [],
-            "current_role": "reviewer",
-            "role_outputs": {
+            "current_task": "review-task",
+            "task_outputs": {
                 "analysis-task": {
                     "messages": [{"role": "assistant", "content": "分析结果：销售额增长20%"}]
                 }
             },
-            "execution_order": ["analyst"]
+            "completed_tasks": ["analysis-task"]
         }
         
-        reviewer_role = builder.roles["reviewer"]
+        review_task = next(t for t in builder.tasks if t["task_id"] == "review-task")
         
         # Act: 构建上下文
-        context = builder._build_role_context(reviewer_role, mock_state)
+        context = builder._build_task_context(review_task, mock_state)
         
         # Assert: 验证上下文内容
         assert "代码审查员" in context
         assert "审查代码质量" in context
         assert "分析结果：销售额增长20%" in context
+        assert "审查分析报告" in context  # 当前任务描述
     
     def test_empty_roles_and_tasks(self):
-        """测试空 roles 和 tasks 配置
+        """测试空 roles 和 tasks 配置（方案 A）
         
         验证点：
+        - 空 tasks 时，_find_entry_tasks 返回空列表
         - 空 roles 时，roles 字典为空
-        - 空 tasks 时，_find_entry_task 返回 None
         """
         # Arrange: 创建空配置
         empty_config = {
@@ -365,7 +366,7 @@ class TestStaticTeamGraphBuilder:
         # Act & Assert: 验证空配置处理
         assert len(builder.roles) == 0
         assert len(builder.tasks) == 0
-        assert builder._find_entry_task() is None
+        assert builder._find_entry_tasks() == []
 
 
 # ============================================================================

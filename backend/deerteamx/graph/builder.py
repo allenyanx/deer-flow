@@ -6,10 +6,11 @@ LangGraph StateGraph，并复用 DeerFlow 的 Agent 工厂进行节点执行。
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, TypedDict
+import operator
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 import httpx
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, StateGraph, add_messages
 from langchain_core.runnables import RunnableConfig
 
 # 导入 DeerFlow 核心组件（通过 Submodule 或 pip 安装）
@@ -22,12 +23,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def merge_dicts(d1: dict, d2: dict) -> dict:
+    """合并两个字典，用于并行任务输出的累加。"""
+    return {**d1, **d2}
+
+def merge_lists(l1: list, l2: list) -> list:
+    """合并两个列表，用于记录已完成的任务序列。"""
+    return l1 + l2
+
 class TeamState(TypedDict):
-    """LangGraph 状态定义。"""
-    messages: list  # 消息历史
+    """LangGraph 状态定义（方案 A：支持并行安全）。"""
+    messages: Annotated[list, add_messages]  # 消息历史（自动追加）
     current_task: str  # 当前执行的任务 ID
-    task_outputs: dict  # 各任务输出结果 {task_id: output}
-    completed_tasks: list  # 已完成的任务列表
+    task_outputs: Annotated[dict, merge_dicts]  # 各任务输出结果 {task_id: output}
+    completed_tasks: Annotated[list, merge_lists]  # 已完成的任务列表
     __next_node__: Optional[str]  # 用于动态触发跳转的下一个节点标识
 
 
@@ -192,6 +201,8 @@ class StaticTeamGraphBuilder:
 
     def _find_entry_tasks(self) -> List[str]:
         """找到所有入口任务（没有任何依赖的任务）。"""
-        all_ids = {t["task_id"] for t in self.tasks}
-        all_deps = {d for t in self.tasks for d in t.get("dependencies", [])}
-        return list(all_ids - all_deps)
+        entry_tasks = []
+        for task in self.tasks:
+            if not task.get("dependencies", []):
+                entry_tasks.append(task["task_id"])
+        return entry_tasks

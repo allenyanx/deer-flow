@@ -6,12 +6,14 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import Column, String, DateTime, select, update, delete
 from sqlalchemy.sql import func
+
+from deerteamx.models.base import Base
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class LockManager:
         Returns:
             是否成功获取锁。
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # 1. 尝试插入或更新锁记录 (Upsert 逻辑)
         # 如果锁不存在，或者锁已过期，则允许获取
@@ -90,7 +92,101 @@ class LockManager:
         Returns:
             如果已锁定，返回当前持有锁的用户 ID；否则返回 None。
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+        stmt = select(LockRecord.owner_id).where(
+            LockRecord.team_id == team_id,
+            LockRecord.expires_at > now
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def acquire_execution_lock(self, team_id: str, execution_id: str, ttl_seconds: int = 1800) -> bool:
+        """尝试获取执行锁（Read-Only 锁）。
+        
+        Args:
+            team_id: 团队标识。
+            execution_id: 执行ID作为锁的持有者标识。
+            ttl_seconds: 锁的自动过期时间（秒），默认30分钟。
+            
+        Returns:
+            是否成功获取锁。
+        """
+        now = datetime.now(timezone.utc)
+        
+        # 1. 尝试插入或更新锁记录 (Upsert 逻辑)
+        # 如果锁不存在，或者锁已过期，则允许获取
+        stmt = (
+            update(LockRecord)
+            .where(
+                LockRecord.team_id == team_id,
+                (LockRecord.expires_at < now) | (LockRecord.owner_id == execution_id)
+            )
+            .values(
+                owner_id=execution_id,
+                acquired_at=now,
+                expires_at=now + timedelta(seconds=ttl_seconds),
+                lock_token=str(uuid.uuid4())
+            )
+        )
+        result = await self.db.execute(stmt)
+        
+        if result.rowcount > 0:
+            await self.db.commit()
+            logger.info(f"Execution lock acquired for team {team_id} by execution {execution_id}")
+            return True
+        
+        # 2. 如果更新失败，尝试插入新记录（处理首次加锁情况）
+        try:
+            new_lock = LockRecord(
+                team_id=team_id,
+                owner_id=execution_id,
+                acquired_at=now,
+                expires_at=now + timedelta(seconds=ttl_seconds),
+                lock_token=str(uuid.uuid4())
+            )
+            self.db.add(new_lock)
+            await self.db.commit()
+            logger.info(f"Execution lock acquired for team {team_id} by execution {execution_id}")
+            return True
+        except Exception:
+            await self.db.rollback()
+            logger.warning(f"Failed to acquire execution lock for team {team_id}, already locked")
+            return False
+
+    async def release_execution_lock(self, team_id: str, execution_id: str) -> bool:
+        """释放执行锁。
+        
+        Args:
+            team_id: 团队标识。
+            execution_id: 执行ID（锁持有者）。
+            
+        Returns:
+            是否成功释放锁。
+        """
+        stmt = delete(LockRecord).where(
+            LockRecord.team_id == team_id,
+            LockRecord.owner_id == execution_id
+        )
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        
+        if result.rowcount > 0:
+            logger.info(f"Execution lock released for team {team_id} by execution {execution_id}")
+            return True
+        else:
+            logger.warning(f"Lock not found or already released for team {team_id}")
+            return False
+
+    async def get_execution_lock_owner(self, team_id: str) -> Optional[str]:
+        """查询执行锁的持有者。
+        
+        Args:
+            team_id: 团队标识。
+            
+        Returns:
+            如果已锁定，返回执行ID；否则返回 None。
+        """
+        now = datetime.now(timezone.utc)
         stmt = select(LockRecord.owner_id).where(
             LockRecord.team_id == team_id,
             LockRecord.expires_at > now

@@ -172,6 +172,45 @@ class Execution(Base, TimestampMixin):
 
 
 # ============================================================================
+# Execution State Model (for Breakpoint Resume)
+# ============================================================================
+
+class ExecutionState(Base, TimestampMixin):
+    """Execution state model - stores task-level execution states for breakpoint resume."""
+    
+    __tablename__ = "execution_states"
+    
+    state_id = Column(Integer, primary_key=True, autoincrement=True)
+    execution_id = Column(String(64), ForeignKey("executions.execution_id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(String(64), nullable=False)  # Task identifier from team config
+    role_id = Column(String(64), nullable=False)  # Role assigned to this task
+    status = Column(
+        String(20),
+        nullable=False,
+        default="pending",
+    )  # pending/running/completed/failed
+    input_data = Column(JSONB, nullable=True)  # Task input data
+    output_data = Column(JSONB, nullable=True)  # Task output data
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    execution = relationship("Execution", backref="states")
+    
+    # Constraints
+    __table_args__ = (
+        Index("idx_execution_states_execution_id", "execution_id"),
+        Index("idx_execution_states_task_id", "task_id"),
+        Index("idx_execution_states_status", "status"),
+        Index("idx_execution_states_created_at", "created_at"),
+    )
+    
+    def __repr__(self):
+        return f"<ExecutionState(state_id={self.state_id}, task_id='{self.task_id}', status='{self.status}')>"
+
+
+# ============================================================================
 # Team Version Model
 # ============================================================================
 
