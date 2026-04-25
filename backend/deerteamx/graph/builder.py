@@ -9,7 +9,6 @@ import re
 import operator
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-import httpx
 from langgraph.graph import END, StateGraph, add_messages
 from langchain_core.runnables import RunnableConfig
 
@@ -145,13 +144,9 @@ class StaticTeamGraphBuilder:
         return task_node
 
     async def _ensure_custom_agent_exists(self, agent_name: str, role: dict):
-        """确保 Custom Agent 存在，并通过 API 原子性更新 Skills 和 SOUL.md
+        """确保 Custom Agent 存在，不存在则创建（使用高质量 SOUL.md 模板）
         
-        实现流程：
-        1. 检查 Agent 是否存在
-        2. 不存在则创建（包含基础配置）
-        3. 生成或获取 SOUL.md 内容
-        4. 通过 Gateway API 更新 Skills 和 SOUL.md
+        实现方式：直接操作文件系统（YAML + Markdown）
         
         Args:
             agent_name: DeerFlow Agent 名称（唯一标识）
@@ -166,86 +161,38 @@ class StaticTeamGraphBuilder:
                 - soul_template: 指定模板名称（可选）
                 - allow_delegation: 是否允许委派
         """
+        import yaml
+        from pathlib import Path
+        from deerflow.config.paths import get_paths
         from deerteamx.services.team_service import TeamService
         
-        async with httpx.AsyncClient() as client:
-            # ========== 步骤 1：检查 Agent 是否存在 ==========
-            resp = await client.get(f"{self.gateway_url}/api/agents/{agent_name}")
-            
-            if resp.status_code == 404:
-                # ========== 步骤 2：不存在则创建 ==========
-                logger.info(f"Creating new agent: {agent_name}")
-                
-                # 生成 SOUL.md 内容（使用模板系统）
-                soul_content = self._generate_soul_for_role(role)
-                
-                create_resp = await client.post(
-                    f"{self.gateway_url}/api/agents",
-                    json={
-                        "name": agent_name,
-                        "description": role.get("description", ""),
-                        "model": role.get("model"),
-                        "tool_groups": role.get("tool_groups", []),
-                        "soul": soul_content  # ← 关键：传入生成的 SOUL.md
-                    }
-                )
-                
-                if create_resp.status_code not in [201, 409]:
-                    raise Exception(
-                        f"Failed to create agent {agent_name}: "
-                        f"{create_resp.status_code} - {create_resp.text}"
-                    )
-                
-                logger.info(f"✅ Agent '{agent_name}' created successfully")
-            else:
-                # ========== 步骤 3：已存在，更新 SOUL.md ==========
-                logger.debug(f"Agent '{agent_name}' already exists, updating SOUL.md")
-                
-                # 重新生成 SOUL.md（确保与最新配置同步）
-                soul_content = self._generate_soul_for_role(role)
-                
-                update_resp = await client.put(
-                    f"{self.gateway_url}/api/agents/{agent_name}/soul",
-                    json={"soul": soul_content}
-                )
-                
-                if update_resp.status_code != 200:
-                    logger.warning(
-                        f"Failed to update SOUL.md for {agent_name}: "
-                        f"{update_resp.status_code} - {update_resp.text}"
-                    )
-
-            # ========== 步骤 4：原子性更新 Skills ==========
-            skills = role.get("skills", [])
-            skills_resp = await client.put(
-                f"{self.gateway_url}/api/agents/{agent_name}/skills",
-                json={"skills": skills}
+        # 获取 Agent 目录路径
+        agent_dir = get_paths().agent_dir(agent_name)
+        config_file = agent_dir / "config.yaml"
+        soul_file = agent_dir / "SOUL.md"
+        
+        # ========== 步骤 1：确保目录存在 ==========
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ========== 步骤 2：写入/更新 config.yaml ==========
+        config = {
+            "name": agent_name,
+            "description": role.get("description", ""),
+            "model": role.get("model"),
+            "tool_groups": role.get("tool_groups", []),
+            "skills": role.get("skills", []),
+        }
+        
+        with open(config_file, "w", encoding="utf-8") as f:
+            yaml.dump(
+                config, 
+                f, 
+                default_flow_style=False, 
+                allow_unicode=True,
+                sort_keys=False  # 保持字段顺序
             )
-            
-            if skills_resp.status_code != 200:
-                logger.warning(
-                    f"Failed to update skills for {agent_name}: "
-                    f"{skills_resp.status_code} - {skills_resp.text}"
-                )
-            else:
-                logger.debug(f"✅ Updated skills for '{agent_name}': {skills}")
-    
-    def _generate_soul_for_role(self, role: dict) -> str:
-        """为角色生成 SOUL.md 内容
         
-        使用 TeamService 的高质量生成方法，支持：
-        1. 用户自定义内容优先
-        2. 指定模板名称
-        3. 自动选择模板
-        
-        Args:
-            role: 角色配置字典
-            
-        Returns:
-            生成的 SOUL.md 内容
-        """
-        from deerteamx.services.team_service import TeamService
-        
+        # ========== 步骤 3：生成并写入 SOUL.md（使用模板系统）==========
         # 优先使用用户提供的 soul_content，否则自动生成
         soul_content = role.get("soul_content")
         
@@ -256,8 +203,15 @@ class StaticTeamGraphBuilder:
                 template_name=role.get("soul_template")  # 可选：用户指定模板
             )
         
-        return soul_content
-
+        soul_file.write_text(soul_content, encoding="utf-8")
+        
+        logger.info(
+            f"✅ Agent '{agent_name}' configured successfully\n"
+            f"   - Model: {config.get('model', 'default')}\n"
+            f"   - Skills: {config.get('skills', [])}\n"
+            f"   - Soul Length: {len(soul_content)} chars"
+        )
+    
     def _build_task_context(self, task: dict, state: TeamState) -> str:
         """构建包含前置任务输出的任务上下文。"""
         parts = []
