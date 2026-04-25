@@ -71,10 +71,20 @@ class RoleConfig(BaseModel):
     """Role configuration schema."""
     
     role_id: str
-    agent_name: str
+    agent_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r'^[a-z0-9-]+$',
+        description="Agent name (lowercase + hyphens only, e.g., 'code-scanner-v1')"
+    )
     name: str
     goal: str
     backstory: Optional[str] = None
+    soul_content: Optional[str] = Field(
+        None,
+        description="SOUL.md content defining agent personality and behavior guidelines"
+    )
     model: Optional[str] = None
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(None, gt=0)

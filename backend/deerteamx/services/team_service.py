@@ -445,7 +445,16 @@ class TeamService:
         # 当前阶段先记录日志，后续Phase 2实现
         for role in roles:
             agent_name = role.get("agent_name", role.get("role_id"))
-            logger.info(f"📝 准备创建Custom Agent: {agent_name}")
+            
+            # 规范化 agent_name（确保小写 + 连字符格式）
+            normalized_agent_name = self._normalize_agent_name(agent_name)
+            if normalized_agent_name != agent_name:
+                logger.warning(
+                    f"⚠️ Agent name normalized: '{agent_name}' -> '{normalized_agent_name}'"
+                )
+                role["agent_name"] = normalized_agent_name
+            
+            logger.info(f"📝 准备创建Custom Agent: {normalized_agent_name}")
             # 实际实现时调用:
             # await deerflow_client.create_agent(agent_config)
     
@@ -468,6 +477,48 @@ class TeamService:
         unique_suffix = str(uuid4())[:8]
         
         return f"team-{slug}-{unique_suffix}"
+    
+    @staticmethod
+    def _normalize_agent_name(agent_name: str) -> str:
+        """规范化 Agent 名称为小写 + 连字符格式
+        
+        将任意格式的 agent_name 转换为 DeerFlow Gateway API 要求的格式：
+        - 全部转换为小写
+        - 空格和下划线转换为连字符
+        - 移除特殊字符（只保留字母、数字、连字符）
+        
+        Args:
+            agent_name: 原始 agent 名称
+            
+        Returns:
+            规范化后的 agent 名称（如: 'code-scanner-v1'）
+            
+        Examples:
+            >>> TeamService._normalize_agent_name("CodeScanner_V1")
+            'codescanner-v1'
+            >>> TeamService._normalize_agent_name("Data Analyst")
+            'data-analyst'
+            >>> TeamService._normalize_agent_name("code_reviewer")
+            'code-reviewer'
+        """
+        import re
+        
+        # 转换为小写
+        normalized = agent_name.lower()
+        
+        # 将空格和下划线转换为连字符
+        normalized = re.sub(r'[\s_]+', '-', normalized)
+        
+        # 移除所有非字母数字和非连字符的字符
+        normalized = re.sub(r'[^a-z0-9-]', '', normalized)
+        
+        # 合并多个连续连字符为单个
+        normalized = re.sub(r'-+', '-', normalized)
+        
+        # 移除首尾的连字符
+        normalized = normalized.strip('-')
+        
+        return normalized
     
     def _increment_version(self, version: str) -> str:
         """递增语义化版本号
@@ -608,3 +659,137 @@ class TeamService:
             next_number += 1
         
         return f"{base_name}({next_number})"
+    
+    # =========================================================================
+    # SOUL.md 模板系统
+    # =========================================================================
+    
+    @staticmethod
+    def generate_soul_content(
+        role: Dict[str, Any],
+        template_name: Optional[str] = None
+    ) -> str:
+        """根据角色配置生成高质量的 SOUL.md 内容
+        
+        生成策略：
+        1. 如果用户提供了 soul_content，直接使用（自定义优先）
+        2. 如果指定了 template_name，使用对应模板
+        3. 否则根据角色特征自动选择最合适的模板
+        
+        Args:
+            role: 角色配置字典，包含 name/goal/backstory/skills 等字段
+            template_name: 可选，指定使用的模板名称
+            
+        Returns:
+            生成的 SOUL.md 内容（Markdown 格式字符串）
+            
+        Examples:
+            >>> role = {
+            ...     "name": "Data Analyst",
+            ...     "goal": "Analyze sales data and provide insights",
+            ...     "backstory": "You are a senior data scientist...",
+            ...     "skills": ["data-analysis", "chart-visualization"]
+            ... }
+            >>> soul = TeamService.generate_soul_content(role)
+            >>> print(soul[:100])
+            '# Expert Analyst: Data Analyst\n\n## Professional Background\nYou are a senior data scientist...'
+        """
+        from deerteamx.graph.soul_templates import get_template
+        from deerteamx.graph.soul_auto_selector import auto_select_template
+        
+        # ========== 策略 1：用户自定义内容优先 ==========
+        if role.get("soul_content"):
+            logger.debug(f"Using custom soul_content for role '{role.get('name')}'")
+            return role["soul_content"]
+        
+        # ========== 策略 2：确定使用的模板 ==========
+        if template_name:
+            # 用户显式指定模板
+            selected_template = template_name
+        else:
+            # 自动选择模板（基于角色特征启发式判断）
+            selected_template = auto_select_template(role)
+        
+        logger.debug(
+            f"Generating soul_content for role '{role.get('name')}' "
+            f"using template '{selected_template}'"
+        )
+        
+        # ========== 策略 3：渲染模板 ==========
+        try:
+            template = get_template(selected_template)
+        except ValueError as e:
+            logger.warning(f"{e}. Falling back to 'default' template.")
+            template = get_template("default")
+            selected_template = "default"
+        
+        # 准备模板变量
+        template_vars = {
+            "name": role.get("name", "Unknown Role"),
+            "goal": role.get("goal", "Complete assigned tasks effectively."),
+            "backstory": role.get("backstory", "You are a professional assistant."),
+        }
+        
+        # 渲染模板
+        soul_content = template.format(**template_vars)
+        
+        # ========== 策略 4：追加额外信息（Skills、Delegation 等）==========
+        additional_sections = []
+        
+        # 添加技能信息
+        if role.get("skills"):
+            skills_list = "\n".join([f"- `{skill}`" for skill in role["skills"]])
+            additional_sections.append(f"""
+## Available Skills
+You have access to the following specialized skills:
+
+{skills_list}
+
+Use these skills when they can help you accomplish your goals more effectively.
+""")
+        
+        # 添加工具组信息
+        if role.get("tool_groups"):
+            tools_list = "\n".join([f"- `{tool}`" for tool in role["tool_groups"]])
+            additional_sections.append(f"""
+## Available Tools
+You can use the following tool groups:
+
+{tools_list}
+
+Choose the appropriate tools based on the task requirements.
+""")
+        
+        # 添加委派能力说明
+        if role.get("allow_delegation"):
+            additional_sections.append("""
+## Delegation Authority
+You have the authority to delegate subtasks to other team members when:
+- The task requires specialized expertise you don't possess
+- Delegating would improve overall team efficiency
+- The subtask is well-defined and can be executed independently
+
+When delegating, clearly specify:
+1. The specific task to be completed
+2. Expected output format and quality standards
+3. Deadline or priority level
+""")
+        
+        # 添加模型配置提示（仅当设置了特定模型时）
+        if role.get("model"):
+            additional_sections.append(f"""
+## Technical Configuration
+- **LLM Model**: `{role['model']}`
+- Optimize your approach based on this model's strengths and limitations
+""")
+        
+        # 合并所有内容
+        if additional_sections:
+            soul_content += "\n" + "\n".join(additional_sections)
+        
+        logger.info(
+            f"✅ Generated soul_content for '{role.get('name')}' "
+            f"({len(soul_content)} chars, template='{selected_template}')"
+        )
+        
+        return soul_content

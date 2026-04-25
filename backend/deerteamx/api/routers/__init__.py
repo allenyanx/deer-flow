@@ -10,6 +10,7 @@ from deerteamx.api.routers.health import router as health_router
 from deerteamx.api.routers.websocket import router as websocket_router
 from deerteamx.api.routers.versions import router as versions_router
 from deerteamx.api.routers.config import router as config_router
+from deerteamx.api.routers.soul import router as soul_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "websocket_router",
     "config_router",
     "versions_router",
+    "soul_router",
 ]
