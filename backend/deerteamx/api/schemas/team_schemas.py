@@ -103,7 +103,7 @@ class TaskConfig(BaseModel):
     task_id: str
     description: str
     expected_output: str
-    assigned_role: str  # References role_id
+    assigned_role: Optional[str] = None  # References role_id (optional)
     dependencies: List[str] = Field(default_factory=list)
     dynamic_trigger: Optional["DynamicTriggerConfig"] = None
 
